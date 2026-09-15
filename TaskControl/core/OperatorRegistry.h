@@ -1,147 +1,86 @@
 #pragma once
 
-/**
- * @file OperatorRegistry.h
- * @brief 算子注册表
- */
-
 #include "IOperator.h"
+#include "OperatorDescriptor.h"
+
 #include <functional>
 #include <memory>
+#include <shared_mutex>
 #include <QHash>
-#include <QString>
 #include <QStringList>
 
 namespace AlgorithmSDK {
-    /**
-     * @brief 算子工厂函数类型
-     */
-    using OperatorFactory = std::function<OperatorPtr()>;
 
-    /**
-     * @brief 算子注册表
-     * 管理所有算子的注册和创建
-     */
-    class OperatorRegistry
+using OperatorFactory = std::function<OperatorPtr()>;
+
+// Registry entries contain immutable metadata and a factory. Each create()
+// invokes that factory, so independent tasks never share an operator instance.
+class OperatorRegistry {
+public:
+    static OperatorRegistry& instance();
+
+    void registerOperator(OperatorDescriptor descriptor, OperatorFactory factory);
+    void registerOperator(const QString& name, OperatorFactory factory);
+    OperatorPtr create(const QString& name) const;
+    OperatorDescriptor descriptor(const QString& name) const;
+    QVector<OperatorDescriptor> descriptors() const;
+    bool hasOperator(const QString& name) const;
+    QStringList registeredOperators() const;
+    void unregisterOperator(const QString& name);
+    void clear();
+    int count() const;
+
+    template <typename Operator>
+    static OperatorDescriptor describe()
     {
-    public:
-        /**
-         * @brief 获取单例实例
-         */
-        static OperatorRegistry& instance()
-        {
-            static OperatorRegistry registry;
-            return registry;
-        }
+        const auto prototype = std::make_shared<Operator>();
+        OperatorDescriptor result;
+        result.name = prototype->name();
+        result.version = QString::number(prototype->version());
+        result.category = prototype->category();
+        result.description = prototype->description();
+        result.paramsSchema = prototype->getParamsSchema();
+        result.inputs = prototype->inputKeys();
+        result.outputs = prototype->outputKeys();
+        return result;
+    }
 
-        /**
-         * @brief 注册算子
-         * @param name 算子名称
-         * @param factory 工厂函数
-         */
-        void registerOperator(const QString& name, OperatorFactory factory)
-        {
-            m_factories[name] = std::move(factory);
-        }
-
-        /**
-         * @brief 创建算子
-         * @param name 算子名称
-         * @return 算子实例，如果不存在返回 nullptr
-         */
-        OperatorPtr create(const QString& name) const
-        {
-            auto it = m_factories.find(name);
-            if (it != m_factories.end()) {
-                return it.value()();
-            }
-            return nullptr;
-        }
-
-        /**
-         * @brief 检查算子是否已注册
-         */
-        bool hasOperator(const QString& name) const
-        {
-            return m_factories.contains(name);
-        }
-
-        /**
-         * @brief 获取所有已注册的算子名称
-         */
-        QStringList registeredOperators() const
-        {
-            return m_factories.keys();
-        }
-
-        /**
-         * @brief 注销算子
-         */
-        void unregisterOperator(const QString& name)
-        {
-            m_factories.remove(name);
-        }
-
-        /**
-         * @brief 清空所有注册
-         */
-        void clear()
-        {
-            m_factories.clear();
-        }
-
-        /**
-         * @brief 获取已注册算子数量
-         */
-        int count() const
-        {
-            return m_factories.count();
-        }
-
-    private:
-        OperatorRegistry() = default;
-        ~OperatorRegistry() = default;
-
-        // 禁止拷贝和赋值
-        OperatorRegistry(const OperatorRegistry&) = delete;
-        OperatorRegistry& operator=(const OperatorRegistry&) = delete;
-
-    private:
-        QHash<QString, OperatorFactory> m_factories;
+private:
+    struct Entry {
+        OperatorDescriptor descriptor;
+        OperatorFactory factory;
     };
 
-    /**
-     * @brief 算子自动注册辅助宏
-     * 用法: REGISTER_OPERATOR(MyOperator)
-     */
+    OperatorRegistry() = default;
+    ~OperatorRegistry() = default;
+    OperatorRegistry(const OperatorRegistry&) = delete;
+    OperatorRegistry& operator=(const OperatorRegistry&) = delete;
+
+    mutable std::shared_mutex m_mutex;
+    QHash<QString, Entry> m_entries;
+};
+
+// Compatibility fallback for existing third-party source. New built-ins are
+// registered centrally with explicit descriptors.
 #define REGISTER_OPERATOR(OperatorClass) \
     namespace { \
-        static bool _registered_##OperatorClass = []() { \
-            auto _prototype_##OperatorClass = std::make_shared<OperatorClass>(); \
+        const bool _registered_##OperatorClass = []() { \
             AlgorithmSDK::OperatorRegistry::instance().registerOperator( \
-                _prototype_##OperatorClass->name(), \
-                []() { return std::make_shared<OperatorClass>(); } \
-            ); \
-            AlgorithmSDK::OperatorRegistry::instance().registerOperator( \
-                #OperatorClass, \
-                []() { return std::make_shared<OperatorClass>(); } \
-            ); \
+                AlgorithmSDK::OperatorRegistry::describe<OperatorClass>(), \
+                []() { return std::make_shared<OperatorClass>(); }); \
             return true; \
         }(); \
     }
 
-     /**
-      * @brief 算子自动注册辅助宏（带自定义名称）
-      * 用法: REGISTER_OPERATOR_NAME(MyOperator, "MyCustomName")
-      */
 #define REGISTER_OPERATOR_NAME(OperatorClass, Name) \
     namespace { \
-        static bool _registered_##OperatorClass = []() { \
+        const bool _registered_##OperatorClass = []() { \
+            auto _descriptor = AlgorithmSDK::OperatorRegistry::describe<OperatorClass>(); \
+            _descriptor.name = Name; \
             AlgorithmSDK::OperatorRegistry::instance().registerOperator( \
-                Name, \
-                []() { return std::make_shared<OperatorClass>(); } \
-            ); \
+                std::move(_descriptor), []() { return std::make_shared<OperatorClass>(); }); \
             return true; \
         }(); \
     }
+
 } // namespace AlgorithmSDK

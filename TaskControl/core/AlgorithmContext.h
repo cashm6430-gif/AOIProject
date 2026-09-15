@@ -1,212 +1,99 @@
 #pragma once
 
-/**
- * @file AlgorithmContext.h
- * @brief 算子数据传递上下文（数据总线）
- */
-
 #include "AlgorithmIO.h"
+#include "CancellationToken.h"
+#include "Error.h"
 #include "geometry/Geometry.h"
 #include "ImageData.h"
 #include "PointCloud.h"
 
+#include <memory>
 #include <QHash>
-#include <QMutex>
-#include <QMutexLocker>
+#include <QReadWriteLock>
 #include <QString>
 #include <QVariant>
 
 namespace AlgorithmSDK {
-    /**
-     * @brief 算法上下文类
-     * 用于算子之间的数据传递，支持类型安全的 get/set 操作
-     */
-    class AlgorithmContext
+
+// Thread-safe data bus for one execution of one workpiece.
+class AlgorithmContext {
+public:
+    AlgorithmContext() = default;
+    ~AlgorithmContext() = default;
+    AlgorithmContext(const AlgorithmContext&) = delete;
+    AlgorithmContext& operator=(const AlgorithmContext&) = delete;
+
+    template<typename T>
+    void set(const QString& key, const T& value)
     {
-    public:
-        AlgorithmContext() = default;
-        ~AlgorithmContext() = default;
+        QWriteLocker locker(&m_lock);
+        m_data[key] = QVariant::fromValue(value);
+    }
 
-        // 禁止拷贝，允许移动
-        AlgorithmContext(const AlgorithmContext&) = delete;
-        AlgorithmContext& operator=(const AlgorithmContext&) = delete;
-        AlgorithmContext(AlgorithmContext&&) = default;
-        AlgorithmContext& operator=(AlgorithmContext&&) = default;
+    template<typename T>
+    T get(const QString& key) const
+    {
+        QReadLocker locker(&m_lock);
+        const auto it = m_data.constFind(key);
+        return it == m_data.cend() ? T() : it->value<T>();
+    }
 
-        /**
-         * @brief 设置数据
-         */
-        template<typename T>
-        void set(const QString& key, const T& value)
-        {
-            QMutexLocker locker(&m_mutex);
-            m_data[key] = QVariant::fromValue(value);
-        }
+    template<typename T>
+    T get(const QString& key, const T& defaultValue) const
+    {
+        QReadLocker locker(&m_lock);
+        const auto it = m_data.constFind(key);
+        return it == m_data.cend() ? defaultValue : it->value<T>();
+    }
 
-        /**
-         * @brief 获取数据
-         */
-        template<typename T>
-        T get(const QString& key) const
-        {
-            QMutexLocker locker(&m_mutex);
-            auto it = m_data.find(key);
-            if (it == m_data.end()) {
-                return T();
-            }
-            return it.value().value<T>();
-        }
+    bool has(const QString& key) const;
+    void remove(const QString& key);
+    void clear();
+    QStringList keys() const;
+    int count() const;
 
-        /**
-         * @brief 获取数据（带默认值）
-         */
-        template<typename T>
-        T get(const QString& key, const T& defaultValue) const
-        {
-            QMutexLocker locker(&m_mutex);
-            auto it = m_data.find(key);
-            if (it == m_data.end()) {
-                return defaultValue;
-            }
-            return it.value().value<T>();
-        }
+    void setImage(const QString& key, const ImageData& image) { set<ImageData>(key, image); }
+    ImageData getImage(const QString& key) const { return get<ImageData>(key); }
+    void setPointCloud(const QString& key, const PointCloud& cloud) { set<PointCloud>(key, cloud); }
+    PointCloud getPointCloud(const QString& key) const { return get<PointCloud>(key); }
+    void setPoint3D(const QString& key, const Geometry::Point3D& point) { set<Geometry::Point3D>(key, point); }
+    Geometry::Point3D getPoint3D(const QString& key) const { return get<Geometry::Point3D>(key); }
+    void setLine3D(const QString& key, const Geometry::Line3D& line) { set<Geometry::Line3D>(key, line); }
+    Geometry::Line3D getLine3D(const QString& key) const { return get<Geometry::Line3D>(key); }
+    void setPlane(const QString& key, const Geometry::Plane& plane) { set<Geometry::Plane>(key, plane); }
+    Geometry::Plane getPlane(const QString& key) const { return get<Geometry::Plane>(key); }
+    void setMeasureResult(const QString& key, const MeasureResult& result) { set<MeasureResult>(key, result); }
+    MeasureResult getMeasureResult(const QString& key) const { return get<MeasureResult>(key); }
+    QVector<MeasureResult> measureResults() const;
 
-        /**
-         * @brief 检查是否存在某个键
-         */
-        bool has(const QString& key) const
-        {
-            QMutexLocker locker(&m_mutex);
-            return m_data.contains(key);
-        }
+    // Compatibility API. New code should attach a structured Error with
+    // pushError(); legacy operators still report through setError().
+    void setError(const QString& message);
+    void pushError(Error error);
+    ErrorList errors() const;
+    bool hasError() const;
+    QString getError() const;
+    void clearError();
 
-        /**
-         * @brief 移除数据
-         */
-        void remove(const QString& key)
-        {
-            QMutexLocker locker(&m_mutex);
-            m_data.remove(key);
-        }
+    void setCancellationToken(std::shared_ptr<CancellationToken> token);
+    bool isCancelled() const;
 
-        /**
-         * @brief 清空所有数据
-         */
-        void clear()
-        {
-            QMutexLocker locker(&m_mutex);
-            m_data.clear();
-        }
+    void setResource(const QString& key, std::shared_ptr<void> resource);
+    template<typename T>
+    std::shared_ptr<const T> resource(const QString& key) const
+    {
+        QReadLocker locker(&m_lock);
+        const auto it = m_resources.constFind(key);
+        return it == m_resources.cend() ? nullptr : std::static_pointer_cast<const T>(it.value());
+    }
+    void clearResources();
 
-        /**
-         * @brief 获取所有键
-         */
-        QList<QString> keys() const
-        {
-            QMutexLocker locker(&m_mutex);
-            return m_data.keys();
-        }
+private:
+    mutable QReadWriteLock m_lock;
+    QHash<QString, QVariant> m_data;
+    QHash<QString, std::shared_ptr<void>> m_resources;
+    ErrorList m_errors;
+    std::shared_ptr<CancellationToken> m_token;
+};
 
-        /**
-         * @brief 获取数据数量
-         */
-        int count() const
-        {
-            QMutexLocker locker(&m_mutex);
-            return m_data.count();
-        }
-
-        // ==================== 便捷方法 ====================
-
-        // 图像相关
-        void setImage(const QString& key, const ImageData& image)
-        {
-            set<ImageData>(key, image);
-        }
-
-        ImageData getImage(const QString& key) const
-        {
-            return get<ImageData>(key);
-        }
-
-        // 点云相关
-        void setPointCloud(const QString& key, const PointCloud& cloud)
-        {
-            set<PointCloud>(key, cloud);
-        }
-
-        PointCloud getPointCloud(const QString& key) const
-        {
-            return get<PointCloud>(key);
-        }
-
-        // 几何对象相关
-        void setPoint3D(const QString& key, const Geometry::Point3D& point)
-        {
-            set<Geometry::Point3D>(key, point);
-        }
-
-        Geometry::Point3D getPoint3D(const QString& key) const
-        {
-            return get<Geometry::Point3D>(key);
-        }
-
-        void setLine3D(const QString& key, const Geometry::Line3D& line)
-        {
-            set<Geometry::Line3D>(key, line);
-        }
-
-        Geometry::Line3D getLine3D(const QString& key) const
-        {
-            return get<Geometry::Line3D>(key);
-        }
-
-        void setPlane(const QString& key, const Geometry::Plane& plane)
-        {
-            set<Geometry::Plane>(key, plane);
-        }
-
-        Geometry::Plane getPlane(const QString& key) const
-        {
-            return get<Geometry::Plane>(key);
-        }
-
-        // 测量结果相关
-        void setMeasureResult(const QString& key, const MeasureResult& result)
-        {
-            set<MeasureResult>(key, result);
-        }
-
-        MeasureResult getMeasureResult(const QString& key) const
-        {
-            return get<MeasureResult>(key);
-        }
-
-        // 错误状态
-        void setError(const QString& message)
-        {
-            set<QString>("__error__", message);
-            set<bool>("__hasError__", true);
-        }
-
-        bool hasError() const
-        {
-            return get<bool>("__hasError__", false);
-        }
-
-        QString getError() const
-        {
-            return get<QString>("__error__");
-        }
-
-        void clearError()
-        {
-            remove("__error__");
-            remove("__hasError__");
-        }
-
-    private:
-        mutable QMutex m_mutex;
-        QHash<QString, QVariant> m_data;
-    };
 } // namespace AlgorithmSDK

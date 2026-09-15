@@ -43,7 +43,7 @@ namespace AlgorithmSDK {
                 return schema;
             }
 
-            void execute(AlgorithmContext& ctx) override
+            bool execute(AlgorithmContext& ctx) override
             {
                 QString mode = getParamString("mode", "flatness");
                 QString outputKey = getParamString("outputKey", "result_tolerance");
@@ -67,10 +67,10 @@ namespace AlgorithmSDK {
                 }
                 else {
                     ctx.setError(QString("Unknown tolerance mode: %1").arg(mode));
-                    return;
+                    return false;
                 }
 
-                if (ctx.hasError()) return;
+                if (ctx.hasError()) return false;
 
                 double toleranceLimit = getParamDouble("toleranceLimit", 0.1);
 
@@ -84,7 +84,8 @@ namespace AlgorithmSDK {
                 result.status = (toleranceValue <= toleranceLimit) ? 0 : 1;
 
                 ctx.setMeasureResult(outputKey, result);
-            }
+        return !ctx.hasError();
+    }
 
         private:
             double computeFlatness(AlgorithmContext& ctx)

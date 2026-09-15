@@ -42,7 +42,7 @@ namespace AlgorithmSDK {
                 return schema;
             }
 
-            void execute(AlgorithmContext& ctx) override
+            bool execute(AlgorithmContext& ctx) override
             {
                 QString mode = getParamString("mode", "line_plane");
                 QString elem1Key = getParamString("element1Key", "element1");
@@ -51,7 +51,7 @@ namespace AlgorithmSDK {
 
                 if (!ctx.has(elem1Key) || !ctx.has(elem2Key)) {
                     ctx.setError("Input elements not found");
-                    return;
+                    return false;
                 }
 
                 if (mode == "line_line") {
@@ -69,7 +69,8 @@ namespace AlgorithmSDK {
                 else {
                     ctx.setError(QString("Unknown intersection mode: %1").arg(mode));
                 }
-            }
+        return !ctx.hasError();
+    }
 
         private:
             void intersectLineLine(AlgorithmContext& ctx, const QString& line1Key,

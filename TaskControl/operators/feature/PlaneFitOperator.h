@@ -49,20 +49,20 @@ namespace AlgorithmSDK {
                 return { getParamString("outputKey", "fitted_plane") };
             }
 
-            void execute(AlgorithmContext& ctx) override
+            bool execute(AlgorithmContext& ctx) override
             {
                 QString inputKey = getParamString("inputKey", "input_pointcloud_0");
                 QString outputKey = getParamString("outputKey", "fitted_plane");
 
                 if (!ctx.has(inputKey)) {
                     ctx.setError(QString("Input key not found: %1").arg(inputKey));
-                    return;
+                    return false;
                 }
 
                 PointCloud input = ctx.getPointCloud(inputKey);
                 if (input.size() < 3) {
                     ctx.setError("Need at least 3 points to fit a plane");
-                    return;
+                    return false;
                 }
 
                 // 收集有效点
@@ -75,7 +75,7 @@ namespace AlgorithmSDK {
 
                 if (points.size() < 3) {
                     ctx.setError("Not enough valid points");
-                    return;
+                    return false;
                 }
 
                 // 计算质心
@@ -119,7 +119,8 @@ namespace AlgorithmSDK {
                 double avgError = sumError / points.size();
 
                 ctx.set<double>(outputKey + "_error", avgError);
-            }
+        return !ctx.hasError();
+    }
         };
 
         // 注册算子

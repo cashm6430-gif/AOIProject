@@ -62,7 +62,7 @@ namespace AlgorithmSDK {
                 return { getParamString("outputKey", "undistorted_image") };
             }
 
-            void execute(AlgorithmContext& ctx) override
+            bool execute(AlgorithmContext& ctx) override
             {
                 QString inputKey = getParamString("inputKey", "input_image_0");
                 QString outputKey = getParamString("outputKey", "undistorted_image");
@@ -70,13 +70,13 @@ namespace AlgorithmSDK {
 
                 if (!ctx.has(inputKey)) {
                     ctx.setError(QString("Input key not found: %1").arg(inputKey));
-                    return;
+                    return false;
                 }
 
                 ImageData inputImage = ctx.getImage(inputKey);
                 if (inputImage.isEmpty()) {
                     ctx.setError("Input image is empty");
-                    return;
+                    return false;
                 }
 
                 // 获取标定参数
@@ -105,7 +105,7 @@ namespace AlgorithmSDK {
                     if (fx <= 0 || fy <= 0) {
                         // 如果没有有效的标定参数，直接输出原图
                         ctx.setImage(outputKey, inputImage);
-                        return;
+                        return false;
                     }
 
                     cameraMatrix.at<double>(0, 0) = fx;
@@ -123,7 +123,7 @@ namespace AlgorithmSDK {
                 cv::Mat srcMat = inputImage.image();
                 if (srcMat.empty()) {
                     ctx.setError("Input image data is invalid");
-                    return;
+                    return false;
                 }
 
                 // 畸变矫正
@@ -132,7 +132,8 @@ namespace AlgorithmSDK {
 
                 ImageData outputImage(dstMat.clone());
                 ctx.setImage(outputKey, outputImage);
-            }
+        return !ctx.hasError();
+    }
         };
 
         // 注册算子

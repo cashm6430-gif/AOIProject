@@ -62,7 +62,7 @@ namespace AlgorithmSDK {
                 return { getParamString("outputKey", "cropped") };
             }
 
-            void execute(AlgorithmContext& ctx) override
+            bool execute(AlgorithmContext& ctx) override
             {
                 QString inputKey = getParamString("inputKey", "input_image_0");
                 QString outputKey = getParamString("outputKey", "cropped");
@@ -70,7 +70,7 @@ namespace AlgorithmSDK {
 
                 if (!ctx.has(inputKey)) {
                     ctx.setError(QString("Input key not found: %1").arg(inputKey));
-                    return;
+                    return false;
                 }
 
                 if (dataType == "image") {
@@ -82,7 +82,8 @@ namespace AlgorithmSDK {
                 else {
                     ctx.setError(QString("Unknown data type: %1").arg(dataType));
                 }
-            }
+        return !ctx.hasError();
+    }
 
         private:
             void cropImage(AlgorithmContext& ctx, const QString& inputKey, const QString& outputKey)

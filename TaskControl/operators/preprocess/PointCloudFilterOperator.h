@@ -50,7 +50,7 @@ namespace AlgorithmSDK {
                 return { getParamString("outputKey", "filtered_pointcloud") };
             }
 
-            void execute(AlgorithmContext& ctx) override
+            bool execute(AlgorithmContext& ctx) override
             {
                 QString inputKey = getParamString("inputKey", "input_pointcloud_0");
                 QString outputKey = getParamString("outputKey", "filtered_pointcloud");
@@ -58,13 +58,13 @@ namespace AlgorithmSDK {
 
                 if (!ctx.has(inputKey)) {
                     ctx.setError(QString("Input key not found: %1").arg(inputKey));
-                    return;
+                    return false;
                 }
 
                 PointCloud input = ctx.getPointCloud(inputKey);
                 if (input.isEmpty()) {
                     ctx.setError("Input point cloud is empty");
-                    return;
+                    return false;
                 }
 
                 // 简单的高度阈值滤波示例
@@ -83,7 +83,7 @@ namespace AlgorithmSDK {
 
                 if (validCount == 0) {
                     ctx.setPointCloud(outputKey, output);
-                    return;
+                    return false;
                 }
 
                 double meanZ = sumZ / validCount;
@@ -108,7 +108,8 @@ namespace AlgorithmSDK {
                 }
 
                 ctx.setPointCloud(outputKey, output);
-            }
+        return !ctx.hasError();
+    }
         };
 
         // 注册算子

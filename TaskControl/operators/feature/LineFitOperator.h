@@ -60,7 +60,7 @@ namespace AlgorithmSDK {
                 return { getParamString("outputKey", "fitted_line") };
             }
 
-            void execute(AlgorithmContext& ctx) override
+            bool execute(AlgorithmContext& ctx) override
             {
                 QString mode = getParamString("mode", "3d");
                 QString outputKey = getParamString("outputKey", "fitted_line");
@@ -71,7 +71,8 @@ namespace AlgorithmSDK {
                 else {
                     fit3DLine(ctx, outputKey);
                 }
-            }
+        return !ctx.hasError();
+    }
 
         private:
             void fit2DLine(AlgorithmContext& ctx, const QString& outputKey)

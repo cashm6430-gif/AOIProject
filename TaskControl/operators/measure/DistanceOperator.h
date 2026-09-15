@@ -43,7 +43,7 @@ namespace AlgorithmSDK {
                 return schema;
             }
 
-            void execute(AlgorithmContext& ctx) override
+            bool execute(AlgorithmContext& ctx) override
             {
                 QString mode = getParamString("mode", "point_to_plane");
                 QString outputKey = getParamString("outputKey", "result_distance");
@@ -61,11 +61,11 @@ namespace AlgorithmSDK {
 
                     if (!ctx.has(pointKey)) {
                         ctx.setError(QString("Point key not found: %1").arg(pointKey));
-                        return;
+                        return false;
                     }
                     if (!ctx.has(planeKey)) {
                         ctx.setError(QString("Plane key not found: %1").arg(planeKey));
-                        return;
+                        return false;
                     }
 
                     Geometry::Point3D point = ctx.getPoint3D(pointKey);
@@ -79,7 +79,7 @@ namespace AlgorithmSDK {
 
                     if (!ctx.has(point1Key) || !ctx.has(point2Key)) {
                         ctx.setError("Point keys not found");
-                        return;
+                        return false;
                     }
 
                     Geometry::Point3D p1 = ctx.getPoint3D(point1Key);
@@ -93,7 +93,7 @@ namespace AlgorithmSDK {
 
                     if (!ctx.has(plane1Key) || !ctx.has(plane2Key)) {
                         ctx.setError("Plane keys not found");
-                        return;
+                        return false;
                     }
 
                     Geometry::Plane p1 = ctx.getPlane(plane1Key);
@@ -113,7 +113,8 @@ namespace AlgorithmSDK {
                 result.status = result.isOK() ? 0 : 1;
 
                 ctx.setMeasureResult(outputKey, result);
-            }
+        return !ctx.hasError();
+    }
         };
 
         // 注册算子

@@ -9,6 +9,16 @@ set(AOI_TASKCONTROL_SOURCES
     TaskControl.cpp
     TaskControl_C.cpp
     TaskControlImpl.cpp
+    core/AlgorithmContext.cpp
+    core/AlgorithmTask.cpp
+    core/CancellationToken.cpp
+    core/OperatorRegistry.cpp
+    core/OperatorGraph.cpp
+    core/PipelineBuilder.cpp
+    core/PluginLoader.cpp
+    core/RegistrationScope.cpp
+    core/SchemaValidator.cpp
+    core/TaskflowExecutor.cpp
     operators/RegisterBuiltinOperators.cpp
     TaskControl.rc
 )
@@ -56,3 +66,15 @@ set_target_properties(TaskControl PROPERTIES
     # per-function export annotations. Preserve the existing DLL ABI here.
     WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
+
+
+if(AOI_BUILD_TASKCONTROL_TESTS)
+    find_package(Catch2 CONFIG REQUIRED)
+
+    add_executable(TaskControlTests
+        tests/CoreArchitectureTests.cpp
+    )
+    target_link_libraries(TaskControlTests PRIVATE AOI::TaskControl Catch2::Catch2WithMain)
+    add_test(NAME TaskControl.CoreArchitecture COMMAND TaskControlTests)
+    set_target_properties(TaskControlTests PROPERTIES FOLDER "Tests")
+endif()

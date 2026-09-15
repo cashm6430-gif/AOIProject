@@ -87,6 +87,10 @@ class AOIProjectConan(ConanFile):
             # produced by the package wrappers in conan/recipes.
             self.requires("vtk/9.5.0@aoi/stable")
 
+    def build_requirements(self):
+        # Core regression tests use Catch2 v3 and are opt-in from CMake.
+        self.test_requires("catch2/3.7.1")
+
     def layout(self):
         cmake_layout(self)
 

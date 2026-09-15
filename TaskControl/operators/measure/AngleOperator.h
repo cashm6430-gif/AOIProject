@@ -51,7 +51,7 @@ namespace AlgorithmSDK {
                 return schema;
             }
 
-            void execute(AlgorithmContext& ctx) override
+            bool execute(AlgorithmContext& ctx) override
             {
                 QString mode = getParamString("mode", "line_line");
                 QString outputKey = getParamString("outputKey", "result_angle");
@@ -73,10 +73,10 @@ namespace AlgorithmSDK {
                 }
                 else {
                     ctx.setError(QString("Unknown angle mode: %1").arg(mode));
-                    return;
+                    return false;
                 }
 
-                if (ctx.hasError()) return;
+                if (ctx.hasError()) return false;
 
                 // 转换单位
                 double angle = (outputUnit == "degree") ? angleRad * 180.0 / M_PI : angleRad;
@@ -92,7 +92,8 @@ namespace AlgorithmSDK {
                 result.status = result.isOK() ? 0 : 1;
 
                 ctx.setMeasureResult(outputKey, result);
-            }
+        return !ctx.hasError();
+    }
 
         private:
             double computeLineLineAngle(AlgorithmContext& ctx)

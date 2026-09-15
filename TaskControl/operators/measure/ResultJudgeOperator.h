@@ -38,7 +38,7 @@ namespace AlgorithmSDK {
                 return schema;
             }
 
-            void execute(AlgorithmContext& ctx) override
+            bool execute(AlgorithmContext& ctx) override
             {
                 QJsonArray keysArray = getParamArray("resultKeys");
                 QString outputKey = getParamString("outputKey", "final_result");
@@ -88,7 +88,8 @@ namespace AlgorithmSDK {
                 finalResult.status = allOK ? 0 : 1;
 
                 ctx.setMeasureResult(outputKey, finalResult);
-            }
+        return !ctx.hasError();
+    }
         };
 
         // 注册算子

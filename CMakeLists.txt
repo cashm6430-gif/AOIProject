@@ -3,6 +3,12 @@ cmake_minimum_required(VERSION 3.28)
 project(AOIProject VERSION 0.1.0 LANGUAGES CXX)
 
 option(AOI_BUILD_SHRIMP "Build the Shrimp Qt application" OFF)
+option(AOI_BUILD_RUNTIME "Build the headless multi-workpiece runtime" ON)
+option(AOI_BUILD_TASKCONTROL_TESTS "Build TaskControl and Runtime Catch2 regression tests" OFF)
+
+if(AOI_BUILD_TASKCONTROL_TESTS)
+    include(CTest)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -54,6 +60,10 @@ function(aoi_deploy_runtime_dependencies target)
 endfunction()
 
 add_subdirectory(TaskControl)
+
+if(AOI_BUILD_RUNTIME)
+    add_subdirectory(Runtime)
+endif()
 
 if(AOI_BUILD_SHRIMP)
     add_subdirectory(Shrimp)

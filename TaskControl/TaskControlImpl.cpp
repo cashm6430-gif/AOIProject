@@ -2,11 +2,11 @@
 #include "operators/RegisterBuiltinOperators.h"
 #include "TaskControlImpl.h"
 #include "XLogger.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 
@@ -30,94 +30,66 @@ TaskControlImpl::~TaskControlImpl()
 bool TaskControlImpl::OpenTask(const std::string& filePath)
 {
     m_configPath = QString::fromStdString(filePath);
-
-    // 先加载插件（如果存在）
     loadPlugins();
 
-    // 打开算法任务
     if (!m_algorithmTask->open()) {
         xError("Failed to open algorithm task");
         return false;
     }
 
-    // 加载配置文件
     QFile configFile(m_configPath);
-    if (configFile.open(QIODevice::ReadOnly)) {
-        QJsonDocument doc = QJsonDocument::fromJson(configFile.readAll());
-        if (!m_algorithmTask->setConfig(doc.object())) {
-            QStringList registeredOps = OperatorRegistry::instance().registeredOperators();
-            xError("Failed to set algorithm task config: {}", m_algorithmTask->lastError().toStdString());
-            xDebug("Registered operators ({}): {}",
-                registeredOps.size(),
-                registeredOps.join(", ").toStdString());
-            return false;
-        }
-    }
-    else
-    {
+    if (!configFile.open(QIODevice::ReadOnly)) {
         xError("Failed to open config file: {}", m_configPath.toStdString());
         return false;
     }
-
+    const QJsonDocument document = QJsonDocument::fromJson(configFile.readAll());
+    if (document.isNull() || !document.isObject()) {
+        xError("Task configuration is not a JSON object: {}", m_configPath.toStdString());
+        return false;
+    }
+    if (!m_algorithmTask->setConfig(document.object())) {
+        const QStringList registeredOps = OperatorRegistry::instance().registeredOperators();
+        xError("Failed to set algorithm task config: {}", m_algorithmTask->lastError().toStdString());
+        xDebug("Registered operators ({}): {}", registeredOps.size(), registeredOps.join(", ").toStdString());
+        return false;
+    }
     return true;
 }
 
 void TaskControlImpl::loadPlugins()
 {
     m_pluginLoader.clearLastErrors();
-
-    QStringList dirs;
-
+    QStringList directories;
     if (!m_configPath.isEmpty()) {
-        QFileInfo configInfo(m_configPath);
-        QDir configDir = configInfo.absoluteDir();
-        dirs.append(configDir.absoluteFilePath("plugins"));
+        directories.append(QFileInfo(m_configPath).absoluteDir().absoluteFilePath("plugins"));
     }
-
-    QString appDir = QCoreApplication::applicationDirPath();
+    const QString appDir = QCoreApplication::applicationDirPath();
     if (!appDir.isEmpty()) {
-        dirs.append(QDir(appDir).absoluteFilePath("plugins"));
+        directories.append(QDir(appDir).absoluteFilePath("plugins"));
     }
-
-    dirs.removeDuplicates();
+    directories.removeDuplicates();
 
     int loadedCount = 0;
-    for (const QString& dir : dirs) {
-        int count = m_pluginLoader.loadFromDirectory(dir);
+    for (const QString& directory : directories) {
+        const int count = m_pluginLoader.loadFromDirectory(directory);
         loadedCount += count;
-        xDebug("Plugin scan dir: {}, loaded {} plugin(s)", dir.toStdString(), count);
+        xDebug("Plugin scan dir: {}, loaded {} plugin(s)", directory.toStdString(), count);
     }
-
-    QStringList pluginNames = m_pluginLoader.loadedPlugins();
-    QStringList pluginErrors = m_pluginLoader.lastErrors();
-    QStringList registeredOps = OperatorRegistry::instance().registeredOperators();
-
-    xDebug("Plugin scan finished, loaded {} plugin(s): {}",
-        loadedCount,
-        pluginNames.join(", ").toStdString());
-
-    if (!pluginErrors.isEmpty()) {
-        for (const QString& err : pluginErrors) {
-            xDebug("Plugin load detail: {}", err.toStdString());
-        }
+    xDebug("Plugin scan finished, loaded {} plugin(s): {}", loadedCount,
+        m_pluginLoader.loadedPlugins().join(", ").toStdString());
+    for (const QString& error : m_pluginLoader.lastErrors()) {
+        xDebug("Plugin load detail: {}", error.toStdString());
     }
-
-    xDebug("Registered operators after plugin scan ({}): {}",
-        registeredOps.size(),
-        registeredOps.join(", ").toStdString());
 }
 
 bool TaskControlImpl::AddData(const std::vector<std::vector<PointData>>& pointsData)
 {
-    if (pointsData.empty() || pointsData[0].empty())
-    {
+    if (pointsData.empty() || pointsData.front().empty()) {
         xError("Invalid point data: empty or malformed");
         return false;
     }
-
     m_pointsData = convertPointData(pointsData);
-
-    return !m_pointsData.empty() && !m_pointsData[0].empty();
+    return !m_pointsData.empty() && !m_pointsData.front().empty();
 }
 
 bool TaskControlImpl::AddImageData(const cv::Mat& imageData)
@@ -126,54 +98,45 @@ bool TaskControlImpl::AddImageData(const cv::Mat& imageData)
         xError("Invalid image data: empty");
         return false;
     }
-
     m_imagesData.push_back(imageData.clone());
     return true;
 }
 
 bool TaskControlImpl::RunTask(std::string& resultJson)
 {
-    // 转换输入数据
     AlgorithmInput input;
     input.workpieceId = 1;
-    if (!m_pointsData.empty() && !m_pointsData[0].empty()) {
+    if (!m_pointsData.empty() && !m_pointsData.front().empty()) {
         input.pointclouds.append(convertToPointCloud(m_pointsData));
     }
-    for (const auto& img : m_imagesData) {
-        input.images.append(ImageData(img));
+    for (const cv::Mat& image : m_imagesData) {
+        input.images.append(ImageData(image));
     }
 
     if (input.isEmpty()) {
-        resultJson = "{}";
+        AlgorithmOutput output;
+        output.reason = "No image or point-cloud input was supplied";
+        output.errors.append({ErrorCategory::Input, 1, output.reason, QString()});
+        resultJson = QJsonDocument(output.toJson()).toJson(QJsonDocument::Compact).toStdString();
         return false;
     }
 
     m_algorithmTask->setInput(input);
-
-    // 执行算法
-    if (!m_algorithmTask->process()) {
-        xError("Algorithm processing failed: {}", m_algorithmTask->lastError().toStdString());
-        resultJson = "{}";
-        return false;
-    }
-
-    // 获取输出
-    AlgorithmOutput output = m_algorithmTask->getOutput();
-
-    // 转换结果
+    const bool success = m_algorithmTask->process();
+    const AlgorithmOutput output = m_algorithmTask->getOutput();
     m_taskResult = convertToDataResult(output);
+    resultJson = QJsonDocument(output.toJson()).toJson(QJsonDocument::Compact).toStdString();
 
-    // 生成 JSON 输出
-    QJsonDocument doc(output.toJson());
-    resultJson = doc.toJson(QJsonDocument::Compact).toStdString();
-
-    return output.ok;
+    if (!success) {
+        xError("Algorithm processing failed: {}", m_algorithmTask->lastError().toStdString());
+    }
+    return success;
 }
 
 bool TaskControlImpl::RunTaskRepeat(std::vector<DataResult>& outputData)
 {
     std::string resultJson;
-    bool success = RunTask(resultJson);
+    const bool success = RunTask(resultJson);
     outputData = m_taskResult;
     return success;
 }
@@ -183,17 +146,20 @@ void TaskControlImpl::ClearTask()
     m_pointsData.clear();
     m_imagesData.clear();
     m_taskResult.clear();
-    if (m_algorithmTask) {
-        m_algorithmTask->close();
-        m_algorithmTask->open();
+    if (!m_algorithmTask) {
+        return;
+    }
 
-        // 重新加载配置
-        if (!m_configPath.isEmpty()) {
-            QFile configFile(m_configPath);
-            if (configFile.open(QIODevice::ReadOnly)) {
-                QJsonDocument doc = QJsonDocument::fromJson(configFile.readAll());
-                m_algorithmTask->setConfig(doc.object());
-            }
+    m_algorithmTask->close();
+    m_algorithmTask->open();
+    if (m_configPath.isEmpty()) {
+        return;
+    }
+    QFile configFile(m_configPath);
+    if (configFile.open(QIODevice::ReadOnly)) {
+        const QJsonDocument document = QJsonDocument::fromJson(configFile.readAll());
+        if (document.isObject()) {
+            m_algorithmTask->setConfig(document.object());
         }
     }
 }
@@ -206,20 +172,16 @@ void TaskControlImpl::ClearTaskResult()
 PointCloud TaskControlImpl::convertToPointCloud(const std::vector<std::vector<PointXYZI>>& pointsData)
 {
     PointCloud cloud;
-
     if (pointsData.empty()) return cloud;
 
-    int height = static_cast<int>(pointsData.size());
-    int width = static_cast<int>(pointsData[0].size());
-
+    const int height = static_cast<int>(pointsData.size());
+    const int width = static_cast<int>(pointsData.front().size());
     cloud = PointCloud::createOrganized(width, height, true);
-
     for (int row = 0; row < height; ++row) {
         for (int col = 0; col < static_cast<int>(pointsData[row].size()); ++col) {
             cloud.at(row, col) = pointsData[row][col];
         }
     }
-
     return cloud;
 }
 
@@ -227,52 +189,35 @@ std::vector<std::vector<PointXYZI>> TaskControlImpl::convertPointData(
     const std::vector<std::vector<PointData>>& pointsData)
 {
     std::vector<std::vector<PointXYZI>> converted;
-    if (pointsData.empty()) {
-        return converted;
-    }
-
     converted.reserve(pointsData.size());
     for (const auto& row : pointsData) {
         std::vector<PointXYZI> convertedRow;
         convertedRow.reserve(row.size());
-        for (const auto& point : row) {
-            convertedRow.emplace_back(
-                static_cast<float>(point.x),
-                static_cast<float>(point.y),
-                static_cast<float>(point.z),
-                static_cast<float>(point.intensity)
-            );
+        for (const PointData& point : row) {
+            convertedRow.emplace_back(static_cast<float>(point.x), static_cast<float>(point.y),
+                static_cast<float>(point.z), static_cast<float>(point.intensity));
         }
-        converted.push_back(convertedRow);
+        converted.push_back(std::move(convertedRow));
     }
-
     return converted;
 }
 
 std::vector<DataResult> TaskControlImpl::convertToDataResult(const AlgorithmOutput& output)
 {
     std::vector<DataResult> results;
-
-    for (const auto& mr : output.results) {
-        DataResult dr;
-        dr.name = mr.name.toStdString();
-        dr.value = mr.value;
-        dr.minVal = mr.nominalValue + mr.lowerTolerance;
-        dr.maxVal = mr.nominalValue + mr.upperTolerance;
-        dr.lowerBound = mr.lowerTolerance;
-        dr.upperBound = mr.upperTolerance;
-        dr.resultState = mr.status;
-
-        // 单位转换
-        if (mr.unit == "mm") {
-            dr.unit = CalcUnit::Millimeter;
-        }
-        else if (mr.unit == "um" || mr.unit == "μm") {
-            dr.unit = CalcUnit::MicroMeter;
-        }
-
-        results.push_back(dr);
+    results.reserve(output.results.size());
+    for (const MeasureResult& measure : output.results) {
+        DataResult result;
+        result.name = measure.name.toStdString();
+        result.value = measure.value;
+        result.minVal = measure.nominalValue + measure.lowerTolerance;
+        result.maxVal = measure.nominalValue + measure.upperTolerance;
+        result.lowerBound = measure.lowerTolerance;
+        result.upperBound = measure.upperTolerance;
+        result.resultState = measure.status;
+        if (measure.unit == "mm") result.unit = CalcUnit::Millimeter;
+        else if (measure.unit == "um" || measure.unit == "μm") result.unit = CalcUnit::MicroMeter;
+        results.push_back(std::move(result));
     }
-
     return results;
 }

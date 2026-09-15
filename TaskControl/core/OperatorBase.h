@@ -26,10 +26,11 @@ namespace AlgorithmSDK {
         int version() const override { return m_version; }
         QString category() const override { return m_category; }
 
-        void setParams(const QJsonObject& params) override
+        bool setParams(const QJsonObject& params) override
         {
             m_params = params;
             onParamsChanged();
+            return true;
         }
 
         QJsonObject getParams() const override { return m_params; }

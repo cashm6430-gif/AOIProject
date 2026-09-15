@@ -1,12 +1,9 @@
 #pragma once
 
-/**
- * @file AlgorithmIO.h
- * @brief 算法输入输出数据结构
- */
-
+#include "Error.h"
 #include "ImageData.h"
 #include "PointCloud.h"
+
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QMetaType>
@@ -15,145 +12,121 @@
 #include <QVector>
 
 namespace AlgorithmSDK {
-    /**
-     * @brief 测量结果
-     */
-    struct MeasureResult
+
+struct MeasureResult {
+    QString name;
+    double value = 0.0;
+    double nominalValue = 0.0;
+    double upperTolerance = 0.0;
+    double lowerTolerance = 0.0;
+    QString unit = "mm";
+    int status = 0;
+
+    bool isOK() const
     {
-        QString name;                   // 测量项名称
-        double value = 0.0;             // 测量值
-        double nominalValue = 0.0;      // 标称值
-        double upperTolerance = 0.0;    // 上公差
-        double lowerTolerance = 0.0;    // 下公差
-        QString unit = "mm";            // 单位
-        int status = 0;                 // 0: OK, 1: NG, -1: Error
+        const double deviation = value - nominalValue;
+        return deviation >= lowerTolerance && deviation <= upperTolerance;
+    }
 
-        bool isOK() const
-        {
-            double deviation = value - nominalValue;
-            return deviation >= lowerTolerance && deviation <= upperTolerance;
-        }
-
-        QJsonObject toJson() const
-        {
-            QJsonObject obj;
-            obj["name"] = name;
-            obj["value"] = value;
-            obj["nominalValue"] = nominalValue;
-            obj["upperTolerance"] = upperTolerance;
-            obj["lowerTolerance"] = lowerTolerance;
-            obj["unit"] = unit;
-            obj["status"] = status;
-            return obj;
-        }
-
-        static MeasureResult fromJson(const QJsonObject& obj)
-        {
-            MeasureResult r;
-            r.name = obj["name"].toString();
-            r.value = obj["value"].toDouble();
-            r.nominalValue = obj["nominalValue"].toDouble();
-            r.upperTolerance = obj["upperTolerance"].toDouble();
-            r.lowerTolerance = obj["lowerTolerance"].toDouble();
-            r.unit = obj["unit"].toString("mm");
-            r.status = obj["status"].toInt();
-            return r;
-        }
-    };
-
-    /**
-     * @brief 算法输入数据
-     */
-    struct AlgorithmInput
+    QJsonObject toJson() const
     {
-        int workpieceId = 0;                    // 工件ID
-        QVector<ImageData> images;              // 图像数据
-        QVector<PointCloud> pointclouds;        // 点云数据
-        QJsonObject additionalData;             // 附加数据
+        return {{"name", name}, {"value", value}, {"nominalValue", nominalValue},
+            {"upperTolerance", upperTolerance}, {"lowerTolerance", lowerTolerance},
+            {"unit", unit}, {"status", status}};
+    }
 
-        bool isEmpty() const
-        {
-            return images.isEmpty() && pointclouds.isEmpty();
-        }
-
-        void clear()
-        {
-            workpieceId = 0;
-            images.clear();
-            pointclouds.clear();
-            additionalData = QJsonObject();
-        }
-
-        QJsonObject toJson() const
-        {
-            QJsonObject obj;
-            obj["workpieceId"] = workpieceId;
-            obj["imageCount"] = images.size();
-            obj["pointcloudCount"] = pointclouds.size();
-            if (!additionalData.isEmpty()) {
-                obj["additionalData"] = additionalData;
-            }
-            return obj;
-        }
-    };
-
-    /**
-     * @brief 算法输出数据
-     */
-    struct AlgorithmOutput
+    static MeasureResult fromJson(const QJsonObject& object)
     {
-        bool ok = false;                        // 总体结果
-        QString reason;                         // 失败原因
-        QVector<MeasureResult> results;         // 测量结果列表
-        QJsonObject additionalData;             // 附加输出数据
-        qint64 processingTimeMs = 0;            // 处理耗时（毫秒）
+        MeasureResult result;
+        result.name = object.value("name").toString();
+        result.value = object.value("value").toDouble();
+        result.nominalValue = object.value("nominalValue").toDouble();
+        result.upperTolerance = object.value("upperTolerance").toDouble();
+        result.lowerTolerance = object.value("lowerTolerance").toDouble();
+        result.unit = object.value("unit").toString("mm");
+        result.status = object.value("status").toInt();
+        return result;
+    }
+};
 
-        void clear()
-        {
-            ok = false;
-            reason.clear();
-            results.clear();
-            additionalData = QJsonObject();
-            processingTimeMs = 0;
+struct AlgorithmInput {
+    int workpieceId = 0;
+    QVector<ImageData> images;
+    QVector<PointCloud> pointclouds;
+    QJsonObject additionalData;
+
+    bool isEmpty() const { return images.isEmpty() && pointclouds.isEmpty(); }
+    void clear()
+    {
+        workpieceId = 0;
+        images.clear();
+        pointclouds.clear();
+        additionalData = {};
+    }
+    QJsonObject toJson() const
+    {
+        QJsonObject object{{"workpieceId", workpieceId}, {"imageCount", images.size()},
+            {"pointcloudCount", pointclouds.size()}};
+        if (!additionalData.isEmpty()) object["additionalData"] = additionalData;
+        return object;
+    }
+};
+
+struct AlgorithmOutput {
+    bool ok = false;
+    QString reason;
+    QVector<MeasureResult> results;
+    ErrorList errors;
+    QJsonObject additionalData;
+    qint64 processingTimeMs = 0;
+
+    void clear()
+    {
+        ok = false;
+        reason.clear();
+        results.clear();
+        errors.clear();
+        additionalData = {};
+        processingTimeMs = 0;
+    }
+
+    QJsonObject toJson() const
+    {
+        QJsonObject object{{"ok", ok}, {"reason", reason}, {"processingTimeMs", processingTimeMs}};
+        QJsonArray resultArray;
+        for (const MeasureResult& result : results) resultArray.append(result.toJson());
+        object["results"] = resultArray;
+
+        QJsonArray errorArray;
+        for (const Error& error : errors) {
+            errorArray.append(QJsonObject{{"category", static_cast<int>(error.category)},
+                {"code", error.code}, {"message", error.message}, {"subject", error.subject}});
         }
+        object["errors"] = errorArray;
+        if (!additionalData.isEmpty()) object["additionalData"] = additionalData;
+        return object;
+    }
 
-        QJsonObject toJson() const
-        {
-            QJsonObject obj;
-            obj["ok"] = ok;
-            obj["reason"] = reason;
-            obj["processingTimeMs"] = processingTimeMs;
-
-            QJsonArray resultsArray;
-            for (const auto& r : results) {
-                resultsArray.append(r.toJson());
-            }
-            obj["results"] = resultsArray;
-
-            if (!additionalData.isEmpty()) {
-                obj["additionalData"] = additionalData;
-            }
-            return obj;
+    static AlgorithmOutput fromJson(const QJsonObject& object)
+    {
+        AlgorithmOutput output;
+        output.ok = object.value("ok").toBool();
+        output.reason = object.value("reason").toString();
+        output.processingTimeMs = object.value("processingTimeMs").toVariant().toLongLong();
+        for (const QJsonValue& value : object.value("results").toArray()) {
+            output.results.append(MeasureResult::fromJson(value.toObject()));
         }
-
-        static AlgorithmOutput fromJson(const QJsonObject& obj)
-        {
-            AlgorithmOutput out;
-            out.ok = obj["ok"].toBool();
-            out.reason = obj["reason"].toString();
-            out.processingTimeMs = obj["processingTimeMs"].toVariant().toLongLong();
-
-            QJsonArray arr = obj["results"].toArray();
-            for (const auto& v : arr) {
-                out.results.append(MeasureResult::fromJson(v.toObject()));
-            }
-
-            if (obj.contains("additionalData")) {
-                out.additionalData = obj["additionalData"].toObject();
-            }
-            return out;
+        for (const QJsonValue& value : object.value("errors").toArray()) {
+            const QJsonObject errorObject = value.toObject();
+            output.errors.append({static_cast<ErrorCategory>(errorObject.value("category").toInt()),
+                errorObject.value("code").toInt(), errorObject.value("message").toString(),
+                errorObject.value("subject").toString()});
         }
-    };
+        if (object.contains("additionalData")) output.additionalData = object.value("additionalData").toObject();
+        return output;
+    }
+};
+
 } // namespace AlgorithmSDK
 
 Q_DECLARE_METATYPE(AlgorithmSDK::MeasureResult)

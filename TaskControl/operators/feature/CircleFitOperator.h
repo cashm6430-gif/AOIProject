@@ -63,7 +63,7 @@ namespace AlgorithmSDK {
                 return { getParamString("outputKey", "fitted_circle") };
             }
 
-            void execute(AlgorithmContext& ctx) override
+            bool execute(AlgorithmContext& ctx) override
             {
                 QString mode = getParamString("mode", "2d");
                 QString outputKey = getParamString("outputKey", "fitted_circle");
@@ -74,7 +74,8 @@ namespace AlgorithmSDK {
                 else {
                     fit3DCircle(ctx, outputKey);
                 }
-            }
+        return !ctx.hasError();
+    }
 
         private:
             void fit2DCircle(AlgorithmContext& ctx, const QString& outputKey)

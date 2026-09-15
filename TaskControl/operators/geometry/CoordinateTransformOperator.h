@@ -58,7 +58,7 @@ namespace AlgorithmSDK {
                 return { getParamString("outputKey", "transformed") };
             }
 
-            void execute(AlgorithmContext& ctx) override
+            bool execute(AlgorithmContext& ctx) override
             {
                 QString inputKey = getParamString("inputKey", "input_pointcloud_0");
                 QString outputKey = getParamString("outputKey", "transformed");
@@ -91,7 +91,7 @@ namespace AlgorithmSDK {
 
                 if (!ctx.has(inputKey)) {
                     ctx.setError(QString("Input key not found: %1").arg(inputKey));
-                    return;
+                    return false;
                 }
 
                 if (dataType == "pointcloud") {
@@ -109,7 +109,8 @@ namespace AlgorithmSDK {
                 else {
                     ctx.setError(QString("Unknown data type: %1").arg(dataType));
                 }
-            }
+        return !ctx.hasError();
+    }
 
         private:
             void transformPointCloud(AlgorithmContext& ctx, const QString& inputKey,

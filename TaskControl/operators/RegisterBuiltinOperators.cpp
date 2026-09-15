@@ -16,35 +16,40 @@
 #include "preprocess/ROICropOperator.h"
 #include "preprocess/UndistortOperator.h"
 
-#include <memory>
+#include <mutex>
 
 namespace AlgorithmSDK {
-    void RegisterBuiltinOperators()
-    {
-        static bool initialized = false;
-        if (initialized) {
-            return;
-        }
-        initialized = true;
+namespace {
 
-        auto& registry = OperatorRegistry::instance();
-
-        registry.registerOperator("GaussianBlur", []() { return std::make_shared<Operators::GaussianBlurOperator>(); });
-        registry.registerOperator("Undistort", []() { return std::make_shared<Operators::UndistortOperator>(); });
-        registry.registerOperator("ROICrop", []() { return std::make_shared<Operators::ROICropOperator>(); });
-        registry.registerOperator("PointCloudFilter", []() { return std::make_shared<Operators::PointCloudFilterOperator>(); });
-
-        registry.registerOperator("EdgeDetect", []() { return std::make_shared<Operators::EdgeDetectOperator>(); });
-        registry.registerOperator("LineFit", []() { return std::make_shared<Operators::LineFitOperator>(); });
-        registry.registerOperator("CircleFit", []() { return std::make_shared<Operators::CircleFitOperator>(); });
-        registry.registerOperator("PlaneFit", []() { return std::make_shared<Operators::PlaneFitOperator>(); });
-
-        registry.registerOperator("CoordinateTransform", []() { return std::make_shared<Operators::CoordinateTransformOperator>(); });
-        registry.registerOperator("Intersection", []() { return std::make_shared<Operators::IntersectionOperator>(); });
-
-        registry.registerOperator("Distance", []() { return std::make_shared<Operators::DistanceOperator>(); });
-        registry.registerOperator("Angle", []() { return std::make_shared<Operators::AngleOperator>(); });
-        registry.registerOperator("Tolerance", []() { return std::make_shared<Operators::ToleranceOperator>(); });
-        registry.registerOperator("ResultJudge", []() { return std::make_shared<Operators::ResultJudgeOperator>(); });
-    }
+template <typename Operator>
+void registerBuiltin(OperatorRegistry& registry)
+{
+    registry.registerOperator(OperatorRegistry::describe<Operator>(),
+        []() { return std::make_shared<Operator>(); });
 }
+
+} // namespace
+
+void RegisterBuiltinOperators()
+{
+    static std::once_flag once;
+    std::call_once(once, []() {
+        auto& registry = OperatorRegistry::instance();
+        registerBuiltin<Operators::GaussianBlurOperator>(registry);
+        registerBuiltin<Operators::UndistortOperator>(registry);
+        registerBuiltin<Operators::ROICropOperator>(registry);
+        registerBuiltin<Operators::PointCloudFilterOperator>(registry);
+        registerBuiltin<Operators::EdgeDetectOperator>(registry);
+        registerBuiltin<Operators::LineFitOperator>(registry);
+        registerBuiltin<Operators::CircleFitOperator>(registry);
+        registerBuiltin<Operators::PlaneFitOperator>(registry);
+        registerBuiltin<Operators::CoordinateTransformOperator>(registry);
+        registerBuiltin<Operators::IntersectionOperator>(registry);
+        registerBuiltin<Operators::DistanceOperator>(registry);
+        registerBuiltin<Operators::AngleOperator>(registry);
+        registerBuiltin<Operators::ToleranceOperator>(registry);
+        registerBuiltin<Operators::ResultJudgeOperator>(registry);
+    });
+}
+
+} // namespace AlgorithmSDK

@@ -58,7 +58,7 @@ namespace AlgorithmSDK {
                 return { getParamString("outputKey", "edges") };
             }
 
-            void execute(AlgorithmContext& ctx) override
+            bool execute(AlgorithmContext& ctx) override
             {
                 QString inputKey = getParamString("inputKey", "input_image_0");
                 QString outputKey = getParamString("outputKey", "edges");
@@ -66,19 +66,19 @@ namespace AlgorithmSDK {
 
                 if (!ctx.has(inputKey)) {
                     ctx.setError(QString("Input key not found: %1").arg(inputKey));
-                    return;
+                    return false;
                 }
 
                 ImageData inputImage = ctx.getImage(inputKey);
                 if (inputImage.isEmpty()) {
                     ctx.setError("Input image is empty");
-                    return;
+                    return false;
                 }
 
                 cv::Mat srcMat = inputImage.image().clone();
                 if (srcMat.empty()) {
                     ctx.setError("Input image data is invalid");
-                    return;
+                    return false;
                 }
 
                 if (srcMat.channels() == 3) {
@@ -112,12 +112,13 @@ namespace AlgorithmSDK {
                 }
                 else {
                     ctx.setError(QString("Unknown edge detection method: %1").arg(method));
-                    return;
+                    return false;
                 }
 
                 ImageData outputImage(dstMat.clone());
                 ctx.setImage(outputKey, outputImage);
-            }
+        return !ctx.hasError();
+    }
         };
 
         // 注册算子
