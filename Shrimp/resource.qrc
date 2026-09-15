@@ -1,6 +1,5 @@
 <RCC>
     <qresource prefix="/">
-        <file>Themes/dark_industrial.qss</file>
         <file>icons/caliper.png</file>
         <file>icons/circlecaliper.png</file>
         <file>icons/fitcircle.png</file>
