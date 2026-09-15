@@ -1,0 +1,328 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Form Files">
+      <UniqueIdentifier>{99349809-55BA-4b9d-BF79-8FDBB0286EB3}</UniqueIdentifier>
+      <Extensions>ui</Extensions>
+      <ParseFiles>false</ParseFiles>
+    </Filter>
+    <Filter Include="Form Files">
+      <UniqueIdentifier>{99349809-55BA-4b9d-BF79-8FDBB0286EB3}</UniqueIdentifier>
+      <Extensions>ui</Extensions>
+      <ParseFiles>false</ParseFiles>
+    </Filter>
+    <Filter Include="Generated Files">
+      <UniqueIdentifier>{71ED8ED8-ACB9-4CE9-BBE1-E00B30144E11}</UniqueIdentifier>
+      <Extensions>cpp;c;cxx;moc;h;def;odl;idl;res;</Extensions>
+    </Filter>
+    <Filter Include="Generated Files">
+      <UniqueIdentifier>{71ED8ED8-ACB9-4CE9-BBE1-E00B30144E11}</UniqueIdentifier>
+      <Extensions>cpp;c;cxx;moc;h;def;odl;idl;res;</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{D9D6E242-F8AF-46E4-B9FD-80ECBC20BA3E}</UniqueIdentifier>
+      <Extensions>qrc;*</Extensions>
+      <ParseFiles>false</ParseFiles>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{D9D6E242-F8AF-46E4-B9FD-80ECBC20BA3E}</UniqueIdentifier>
+      <Extensions>qrc;*</Extensions>
+      <ParseFiles>false</ParseFiles>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="System">
+      <UniqueIdentifier>{919f4ef8-f680-4ad3-8118-3dbf31fa36c5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="GUICommon">
+      <UniqueIdentifier>{402c21cf-d5dd-4dea-8bfd-d6d4e6f2039f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="UserManager">
+      <UniqueIdentifier>{fefce019-e901-4157-a9bd-c54b3e9a66a5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Logger">
+      <UniqueIdentifier>{9ae6bcc6-44a4-4c6c-abc0-dd40365f89a7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Themes">
+      <UniqueIdentifier>{8b6eafb9-c7e6-45ae-af90-17c90d17aafa}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="algcontrol.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="system\deleteimage.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="mainwindow.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="qimageview.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="roiitem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="system\platformparamsdlg.cpp">
+      <Filter>System</Filter>
+    </ClCompile>
+    <ClCompile Include="guicommon\showcpumemory.cpp">
+      <Filter>GUICommon</Filter>
+    </ClCompile>
+    <ClCompile Include="guicommon\showdatetime.cpp">
+      <Filter>GUICommon</Filter>
+    </ClCompile>
+    <ClCompile Include="logger\xlogger.cpp">
+      <Filter>Logger</Filter>
+    </ClCompile>
+    <ClCompile Include="usermanager\usermanager.cpp">
+      <Filter>UserManager</Filter>
+    </ClCompile>
+    <ClCompile Include="usermanager\usermanagerdialog.cpp">
+      <Filter>UserManager</Filter>
+    </ClCompile>
+    <ClCompile Include="system\systemsettingdlg.cpp">
+      <Filter>System</Filter>
+    </ClCompile>
+    <ClCompile Include="system\systemsetting.cpp">
+      <Filter>System</Filter>
+    </ClCompile>
+    <ClCompile Include="PclVtkConverter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="VtkCloudRenderer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="pointcloudwidget.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ImageWidget.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="globalparamsdialog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="algrecipe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="algcontrol.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="system\commondefines.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="datadefine.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="system\deleteimage.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <QtMoc Include="mainwindow.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="qimageview.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="roiitem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="usermanager\usermanager.h">
+      <Filter>UserManager</Filter>
+    </ClInclude>
+    <ClInclude Include="logger\xlogger.h">
+      <Filter>Logger</Filter>
+    </ClInclude>
+    <ClInclude Include="system\systemsetting.h">
+      <Filter>System</Filter>
+    </ClInclude>
+    <ClInclude Include="logger\qt_textedit_sink.h">
+      <Filter>Logger</Filter>
+    </ClInclude>
+    <ClInclude Include="resource.h">
+      <Filter>Generated Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VtkCloudRenderer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PclVtkConverter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="algrecipe.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <QtUic Include="system\systemsettingdlg.ui">
+      <Filter>System</Filter>
+    </QtUic>
+    <QtUic Include="usermanager\usermanagerdialog.ui">
+      <Filter>UserManager</Filter>
+    </QtUic>
+    <QtUic Include="system\platformparamsdlg.ui">
+      <Filter>System</Filter>
+    </QtUic>
+    <QtUic Include="globalparamsdialog.ui">
+      <Filter>Form Files</Filter>
+    </QtUic>
+    <QtUic Include="ImageWidget.ui">
+      <Filter>Form Files</Filter>
+    </QtUic>
+    <QtUic Include="pointcloudwidget.ui">
+      <Filter>Form Files</Filter>
+    </QtUic>
+  </ItemGroup>
+  <ItemGroup>
+    <QtUic Include="mainwindow.ui">
+      <Filter>Form Files</Filter>
+    </QtUic>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="icons\about.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\angle.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\authority.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\calibration.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\caliper.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\camera.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\chessboard.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\circlecaliper.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\communication.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\contrast.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\diameter.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\exit.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\fitEllipse.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\fitcircle.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\fitline.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\height.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\history.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\home.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\imageblur.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\light.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\lineangle.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\linecaliper.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\linedist.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\matchtemplate.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\recipe.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <QtRcc Include="resource.qrc">
+      <Filter>Resource Files</Filter>
+    </QtRcc>
+    <None Include="icons\roi.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\system.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\targetwidth.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\user.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="icons\width.png">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="Themes\dark_industrial.qss">
+      <Filter>Themes</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="Shrimp_resource.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="usermanager\usermanagerdialog.h">
+      <Filter>UserManager</Filter>
+    </QtMoc>
+    <QtMoc Include="system\platformparamsdlg.h">
+      <Filter>System</Filter>
+    </QtMoc>
+    <QtMoc Include="guicommon\showdatetime.h">
+      <Filter>GUICommon</Filter>
+    </QtMoc>
+    <QtMoc Include="guicommon\showcpumemory.h">
+      <Filter>GUICommon</Filter>
+    </QtMoc>
+    <QtMoc Include="system\systemsettingdlg.h">
+      <Filter>System</Filter>
+    </QtMoc>
+    <QtMoc Include="globalparamsdialog.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="pointcloudwidget.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="ImageWidget.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="logo.ico" />
+  </ItemGroup>
+</Project>

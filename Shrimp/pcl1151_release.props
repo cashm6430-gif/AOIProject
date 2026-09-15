@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ImportGroup Label="PropertySheets" />
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <IncludePath>D:\PublicLibraries\PCL_1.15.1\include\pcl-1.15;D:\PublicLibraries\PCL_1.15.1\3rdParty\Boost\include\boost-1_87;D:\PublicLibraries\PCL_1.15.1\3rdParty\Eigen3\include\eigen3;D:\PublicLibraries\vtk942_qt512\include\vtk-9.4;$(IncludePath)</IncludePath>
+    <LibraryPath>D:\PublicLibraries\PCL_1.15.1\lib;D:\PublicLibraries\vtk942_qt512\lib;$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <SDLCheck>false</SDLCheck>
+      <PreprocessorDefinitions>_CONSOLE;_CRT_SECURE_NO_WARNINGS;BOOST_USE_WINDOWS_H;NOMINMAX;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>pcl_common.lib;pcl_io.lib;pcl_io_ply.lib;vtkCommonCore-9.4.lib;vtkCommonDataModel-9.4.lib;vtkCommonExecutionModel-9.4.lib;vtkCommonMath-9.4.lib;vtkCommonTransforms-9.4.lib;vtkFiltersCore-9.4.lib;vtkFiltersGeneral-9.4.lib;vtkFiltersSources-9.4.lib;vtkInteractionStyle-9.4.lib;vtkInteractionWidgets-9.4.lib;vtkRenderingAnnotation-9.4.lib;vtkRenderingCore-9.4.lib;vtkRenderingFreeType-9.4.lib;vtkRenderingOpenGL2-9.4.lib;vtkRenderingUI-9.4.lib;vtkGUISupportQt-9.4.lib;vtkRenderingQt-9.4.lib;vtksys-9.4.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup />
+</Project>

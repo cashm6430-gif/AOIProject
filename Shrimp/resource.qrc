@@ -1,0 +1,38 @@
+<RCC>
+    <qresource prefix="/">
+        <file>Themes/dark_industrial.qss</file>
+        <file>icons/caliper.png</file>
+        <file>icons/circlecaliper.png</file>
+        <file>icons/fitcircle.png</file>
+        <file>icons/fitline.png</file>
+        <file>icons/imageblur.png</file>
+        <file>icons/lineangle.png</file>
+        <file>icons/linecaliper.png</file>
+        <file>icons/linedist.png</file>
+        <file>icons/matchtemplate.png</file>
+        <file>icons/targetwidth.png</file>
+        <file>icons/fitEllipse.png</file>
+        <file>icons/angle.png</file>
+        <file>icons/height.png</file>
+        <file>icons/width.png</file>
+        <file>icons/diameter.png</file>
+        <file>icons/chessboard.png</file>
+        <file>icons/contrast.png</file>
+        <file>icons/calibration.png</file>
+        <file>icons/camera.png</file>
+        <file>icons/communication.png</file>
+        <file>icons/exit.png</file>
+        <file>icons/history.png</file>
+        <file>icons/home.png</file>
+        <file>icons/light.png</file>
+        <file>icons/recipe.png</file>
+        <file>icons/system.png</file>
+        <file>icons/user.png</file>
+        <file>icons/authority.png</file>
+        <file>icons/about.png</file>
+        <file>icons/PointsCloud.png</file>
+        <file>icons/ROI.png</file>
+        <file>icons/Flatness.png</file>
+        <file>icons/Align.png</file>
+    </qresource>
+</RCC>

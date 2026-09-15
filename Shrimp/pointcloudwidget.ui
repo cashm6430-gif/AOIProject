@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>PointCloudWidget</class>
+ <widget class="QWidget" name="PointCloudWidget">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>400</width>
+    <height>300</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <layout class="QHBoxLayout" name="controlLayout">
+     <item>
+      <widget class="QPushButton" name="roiButton">
+       <property name="text"><string>框选ROI</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="measureButton">
+       <property name="text"><string>测量</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="measureResult">
+       <property name="text"><string>（结果）</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="stretch">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QVTKOpenGLNativeWidget" name="vtkOpenGLWidget"/>
+   </item>
+   <item>
+    <widget class="QGraphicsView" name="roiView"/>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>QVTKOpenGLNativeWidget</class>
+   <extends>QOpenGLWidget</extends>
+   <header location="global">qvtkopenglnativewidget.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

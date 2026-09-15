@@ -1,0 +1,20 @@
+# Conan build folders and CMake outputs
+/out/
+/CMakeUserPresets.json
+__pycache__/
+*.pyc
+/selftest_*.log
+/.obsidian/
+
+# IDE-local state
+/.vs/
+**/.vs/
+*.user
+*.suo
+*.vcxproj.user
+*.VC.db
+*.VC.opendb
+
+# Legacy project outputs
+/build/
+/IntDir/

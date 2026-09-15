@@ -1,0 +1,45 @@
+{
+  "pipeline": [
+    {
+      "id": "filter",
+      "operator": "PointCloudFilter",
+      "params": {
+        "inputKey": "input_pointcloud_0",
+        "outputKey": "filtered_pointcloud",
+        "stddevMulThresh": 1.5
+      },
+      "deps": []
+    },
+    {
+      "id": "fit_plane",
+      "operator": "PlaneFit",
+      "params": {
+        "inputKey": "filtered_pointcloud",
+        "outputKey": "fitted_plane"
+      },
+      "deps": ["filter"]
+    },
+    {
+      "id": "measure_distance",
+      "operator": "Distance",
+      "params": {
+        "mode": "point_to_plane",
+        "pointKey": "measure_point",
+        "planeKey": "fitted_plane",
+        "outputKey": "result_distance",
+        "nominalValue": 0.0,
+        "upperTolerance": 0.05,
+        "lowerTolerance": -0.05
+      },
+      "deps": ["fit_plane"]
+    },
+    {
+      "id": "judge",
+      "operator": "ResultJudge",
+      "params": {
+        "outputKey": "final_result"
+      },
+      "deps": ["measure_distance"]
+    }
+  ]
+}
