@@ -45,12 +45,11 @@
 - 但在 `AlgorithmTask` / `TaskControlImpl` 中未见 `loadFromDirectory(...)` 或 `loadPlugin(...)` 调用。
 - 结果：运行时不会自动加载任何插件 DLL。
 
-### 3.2 插件工程未纳入当前解决方案主构建
+### 3.2 构建入口已统一为 CMake
 
-- `TaskControl.slnx` 仅包含：
-  - `TaskControl/TaskControl.vcxproj`
-  - `taskflow_demo/taskflow_demo.vcxproj`
-- `Plugins/` 目录未作为独立项目加入当前 VS 工程链（仅文件夹存在）。
+- 当前工程只使用根目录的 `CMakeLists.txt`、`CMakePresets.json` 和 `conanfile.py`。
+- `TaskControl` 是 `Libraries` 目录下的动态库目标；启用 `AOI_BUILD_SHRIMP` 后，`Shrimp` 是 `Applications` 目录下的 GUI 目标。
+- 历史 qmake/MSBuild 项目文件已移除，Visual Studio 应以“打开本地文件夹”的方式加载 CMake 工程，避免旧依赖配置再次进入构建链。
 
 ### 3.3 运行目录未见插件 DLL 部署
 
@@ -80,11 +79,10 @@
 
 - `create("PlaneFit")` 找不到工厂（即便类已被 include 并执行了静态注册）。
 
-### 4.2 当前“可用算子”还依赖 `Example_Usage.cpp` 的副作用 include
+### 4.2 历史示例文件与算子注册
 
 - `TaskControl/examples/Example_Usage.cpp` 手工 include 了少量算子头（注释写着“确保注册”）。
-- 这意味着注册行为依赖示例文件是否参与编译，属于脆弱设计。
-- 当前 `TaskControl.vcxproj` 确实编译了该示例文件，但这不是稳定的生产机制。
+- 该文件保留为 API 使用示例，当前 CMake 库目标不会编译它；生产代码不应依赖示例文件的静态注册副作用。
 
 ---
 
@@ -207,7 +205,7 @@
 - `TaskControl/operators/*`
 - `Plugins/*`
 - `doc/pipeline_example.json`
-- `TaskControl.slnx`
+- 根目录 `CMakeLists.txt` 与 `CMakePresets.json`（当前唯一构建入口）
 
 ---
 

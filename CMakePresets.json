@@ -40,6 +40,18 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/release/build/Release/generators/conan_toolchain.cmake"
       }
+    },
+    {
+      "name": "vs2022-release",
+      "generator": "Visual Studio 17 2022",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "binaryDir": "${sourceDir}/out/build/vs2022-release",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/vs2022-release/build/generators/conan_toolchain.cmake"
+      }
     }
   ],
   "buildPresets": [
@@ -54,6 +66,11 @@
     {
       "name": "build-release",
       "configurePreset": "release"
+    },
+    {
+      "name": "build-vs2022-release",
+      "configurePreset": "vs2022-release",
+      "configuration": "Release"
     }
   ]
 }

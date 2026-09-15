@@ -65,6 +65,22 @@ by default because Shrimp needs the private VTK package.
 `TaskControl` still exposes a C++ API. Cross-process or independently built
 plug-ins should use `TaskControl_C.h` until its C++ boundary is redesigned.
 
+## Visual Studio solution view
+
+Open the repository folder in Visual Studio, or generate a native VS2022
+solution with the dedicated preset. The generated solution places `Shrimp` in
+`Applications` and `TaskControl` in `Libraries`; within each project it groups
+sources, headers, Qt forms, resources and feature folders separately.
+
+```powershell
+conan install . --lockfile=conan.lock --build=missing -pr:h=conan/profiles/windows-msvc-v143-x64-vs2022 -pr:b=conan/profiles/windows-msvc-v143-x64-vs2022 -s:h build_type=Release -o "&:with_shrimp=True" -of=out/conan/vs2022-release
+cmake --preset vs2022-release -DAOI_BUILD_SHRIMP=ON
+cmake --build --preset build-vs2022-release
+```
+
+Open `out/build/vs2022-release/AOIProject.sln` in Visual Studio after the
+configuration step. Do not reintroduce legacy `.pro`, `.pri`, `.props` or
+`.vcxproj` files: their dependency paths are not part of the Conan build.
 
 
 

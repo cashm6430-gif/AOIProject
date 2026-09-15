@@ -13,7 +13,24 @@ set(AOI_TASKCONTROL_SOURCES
     TaskControl.rc
 )
 
-add_library(TaskControl SHARED ${AOI_TASKCONTROL_SOURCES})
+file(GLOB_RECURSE AOI_TASKCONTROL_HEADERS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.h"
+)
+
+# These groups are consumed by Visual Studio's CMake integration. They do not
+# affect the compiler inputs, but keep the library navigable by responsibility.
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" PREFIX "Source Files"
+    FILES ${AOI_TASKCONTROL_SOURCES}
+)
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" PREFIX "Header Files"
+    FILES ${AOI_TASKCONTROL_HEADERS}
+)
+source_group("Resources" FILES "${CMAKE_CURRENT_SOURCE_DIR}/TaskControl.rc")
+
+add_library(TaskControl SHARED
+    ${AOI_TASKCONTROL_SOURCES}
+    ${AOI_TASKCONTROL_HEADERS}
+)
 add_library(AOI::TaskControl ALIAS TaskControl)
 
 target_compile_definitions(TaskControl PRIVATE TASKCONTROL_EXPORTS QT_NO_KEYWORDS)
@@ -34,6 +51,7 @@ target_link_libraries(TaskControl
 
 set_target_properties(TaskControl PROPERTIES
     DEBUG_POSTFIX d
+    FOLDER "Libraries"
     # The legacy DLL exposes its C++ operator registration entry points without
     # per-function export annotations. Preserve the existing DLL ABI here.
     WINDOWS_EXPORT_ALL_SYMBOLS ON

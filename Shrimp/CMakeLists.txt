@@ -9,12 +9,31 @@ find_package(VTK CONFIG REQUIRED COMPONENTS
     RenderingAnnotation RenderingCore RenderingFreeType RenderingOpenGL2 RenderingUI
     GUISupportQt RenderingQt
 )
-file(GLOB_RECURSE AOI_SHRIMP_SOURCES CONFIGURE_DEPENDS
+file(GLOB_RECURSE AOI_SHRIMP_CPP_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+)
+file(GLOB_RECURSE AOI_SHRIMP_HEADERS CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.h"
+)
+file(GLOB_RECURSE AOI_SHRIMP_FORMS CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.ui"
+)
+file(GLOB_RECURSE AOI_SHRIMP_RESOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.qrc"
     "${CMAKE_CURRENT_SOURCE_DIR}/*.rc"
+)
+file(GLOB_RECURSE AOI_SHRIMP_ASSETS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.png"
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.ico"
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.qss"
+)
+
+set(AOI_SHRIMP_SOURCES
+    ${AOI_SHRIMP_CPP_SOURCES}
+    ${AOI_SHRIMP_HEADERS}
+    ${AOI_SHRIMP_FORMS}
+    ${AOI_SHRIMP_RESOURCES}
+    ${AOI_SHRIMP_ASSETS}
 )
 
 # AlgorithmSDK keeps its operator registry as a header-defined singleton.  The
@@ -24,11 +43,27 @@ list(APPEND AOI_SHRIMP_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/../TaskControl/operators/RegisterBuiltinOperators.cpp"
 )
 
+# Logical filters for the Visual Studio CMake project.  This mirrors the
+# source tree, separates forms and assets from code, and makes each feature
+# area (System, UserManager, GUICommon, Logger, ...) directly discoverable.
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" PREFIX "Source Files"
+    FILES ${AOI_SHRIMP_CPP_SOURCES}
+)
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" PREFIX "Header Files"
+    FILES ${AOI_SHRIMP_HEADERS}
+)
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" PREFIX "Forms"
+    FILES ${AOI_SHRIMP_FORMS}
+)
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" PREFIX "Resources"
+    FILES ${AOI_SHRIMP_RESOURCES} ${AOI_SHRIMP_ASSETS}
+)
+source_group("Dependencies/TaskControl" FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/../TaskControl/operators/RegisterBuiltinOperators.cpp"
+)
+
 # The legacy project uses unqualified includes across its feature folders.
 # Preserve that layout without relying on IDE-specific include settings.
-file(GLOB_RECURSE AOI_SHRIMP_HEADERS CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.h"
-)
 set(AOI_SHRIMP_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}")
 foreach(AOI_SHRIMP_HEADER IN LISTS AOI_SHRIMP_HEADERS)
     get_filename_component(AOI_SHRIMP_HEADER_DIR "${AOI_SHRIMP_HEADER}" DIRECTORY)
@@ -41,6 +76,7 @@ set_target_properties(Shrimp PROPERTIES
     AUTOMOC ON
     AUTOUIC ON
     AUTORCC ON
+    FOLDER "Applications"
 )
 
 # Qt 6 removed QSettings::setIniCodec because INI files are UTF-8.  Restrict
@@ -76,3 +112,7 @@ target_link_libraries(Shrimp
 if(COMMAND vtk_module_autoinit)
     vtk_module_autoinit(TARGETS Shrimp MODULES ${VTK_LIBRARIES})
 endif()
+
+# Deploy TaskControl, VTK, OpenCV, PCL and their shared dependencies beside
+# Shrimp, then deploy Qt's required runtime plugins.
+aoi_deploy_runtime_dependencies(Shrimp)
