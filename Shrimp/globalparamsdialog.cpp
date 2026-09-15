@@ -1,4 +1,4 @@
-﻿#include "globalparamsdialog.h"
+#include "globalparamsdialog.h"
 #include "ui_globalparamsdialog.h"
 
 #include "algrecipe.h"

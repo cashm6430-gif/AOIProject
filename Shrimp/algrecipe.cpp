@@ -1,4 +1,4 @@
-﻿#include "algrecipe.h"
+#include "algrecipe.h"
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>

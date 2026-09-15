@@ -116,3 +116,12 @@ endif()
 # Deploy TaskControl, VTK, OpenCV, PCL and their shared dependencies beside
 # Shrimp, then deploy Qt's required runtime plugins.
 aoi_deploy_runtime_dependencies(Shrimp)
+
+# The application loads its editable stylesheet from the directory beside the
+# executable. Keep the complete directory layout in every build output.
+add_custom_command(TARGET Shrimp POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/Themes"
+        "$<TARGET_FILE_DIR:Shrimp>/Themes"
+    VERBATIM
+)
