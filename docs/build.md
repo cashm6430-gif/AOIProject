@@ -242,7 +242,10 @@ Qt-enabled, same MSVC / Qt ABI), so `conan/recipes/vtk` builds VTK 9.5.0 from
 source and publishes it as `vtk/9.5.0@aoi/stable`. It is the only package in the
 graph that does not come from ConanCenter. `scripts/build-debug.sh` gives it its
 own first stage, which skips itself whenever the cache already holds a matching
-package:
+Debug package — *matching* includes the recipe revision `conan.lock` pins, since
+Conan keys binaries by revision: a rebuilt recipe leaves the previous binary in
+the cache under a revision nothing resolves any more, and a skip test that only
+asked "is there any Debug vtk?" answered yes and silently kept it.
 
 ```console
 $ bash scripts/build-debug.sh vtk                # skips when cached
@@ -320,14 +323,136 @@ regenerate the lockfile — in that order:
 
 ```powershell
 bash scripts/build-debug.sh vtk
+mv conan.lock conan.lock.old                       # see below: this step is the one that matters
 conan lock create . --lockfile-out=conan.lock -o "&:with_shrimp=True" -pr:h=conan/profiles/windows-msvc-v143-x64 -pr:b=conan/profiles/windows-msvc-v143-x64 -s:h build_type=Debug --no-remote
+```
+
+`mv conan.lock conan.lock.old` is not housekeeping, it is the whole point.
+`conan lock create` picks up a `conan.lock` sitting in the working directory and
+uses it as its **base** lockfile, and a base lock pins revisions — so with the
+old file still in place the command returns the old revision, byte for byte,
+and looks like it worked. Measured on this repository:
+
+```console
+$ # conan.lock pinned #4b2e39c8…, the cache held both revisions
+$ conan lock create . --lockfile-out=conan.lock … --no-remote
+Generated lockfile: E:\projects\AOIProject\conan.lock
+$ diff conan.lock.old conan.lock                     # nothing at all
+$
+$ mv conan.lock conan.lock.old                       # the step above
+$ conan lock create . --lockfile-out=conan.lock … --no-remote
+Generated lockfile: E:\projects\AOIProject\conan.lock
+$ diff conan.lock.old conan.lock
+6c6
+<         "vtk/9.5.0@aoi/stable#4b2e39c8236ef9d854f61fbc64a048f0%1789540186.0359285",
+---
+>         "vtk/9.5.0@aoi/stable#983c7acfa0cabef0ae92c662007b543f%1789552790.1410687",
 ```
 
 `conan lock create` resolves **binary** package ids, not just the recipe graph,
 so it fails with the same "not resolved" error if it is run before the package
 is built. Nothing else needs regenerating: the lockfile stores recipe
 revisions only, and those do not depend on the build type, so one Debug
-resolution covers the Release and RelWithDebInfo presets too.
+resolution covers the Release and RelWithDebInfo presets too — verified by the
+diff above, where those 45 other entries stayed byte-identical.
+
+That failure is no longer where you meet the problem: the `vtk` stage now
+exports the recipe and compares the revision it got with the one the lockfile
+pins *before* it starts compiling, and reports the two hashes side by side. See
+the next section — there is a second way to produce a mismatch, and it does not
+involve editing anything.
+
+#### The recipe revision hashes the bytes on disk, not the recipe's meaning
+
+`conan.lock` pins `vtk/9.5.0@aoi/stable#983c7acfa0cabef0ae92c662007b543f`, and
+that hash is a checksum of the **bytes** of `conan/recipes/vtk/conanfile.py` as
+they sit in the working tree. Line endings are part of those bytes, so the same
+recipe written with CRLF and with LF is **two different recipes**. Measured in a
+throwaway `CONAN_HOME`, exporting one such file both ways:
+
+```text
+LF    -> vtk/9.5.0@aoi/stable#983c7acfa0cabef0ae92c662007b543f
+CRLF  -> vtk/9.5.0@aoi/stable#4b2e39c8236ef9d854f61fbc64a048f0
+```
+
+The second revision is the one this project shipped for a while, and no fresh
+clone can ever produce it. What makes that dangerous is that **git's own
+comparison cannot see the difference**. `.gitattributes` declares
+`*.py text eol=lf`, so a clone always checks out LF — and the same rule makes git
+compare a CRLF worktree as if it were LF. Measured with the recipe sitting in
+that state:
+
+```console
+$ git status --short
+ M conan/recipes/vtk/conanfile.py    # ...which nothing below can explain
+$ git diff --stat                    # (nothing)
+$ git hash-object conan/recipes/vtk/conanfile.py
+56930938665b8064f5ddb2f889d0b9dfaf8693d4     # == git rev-parse HEAD:…, i.e. "unmodified"
+$ git diff-files --raw
+:100644 100644 56930938665b8064f5ddb2f889d0b9dfaf8693d4 0000…0000 M	conan/recipes/vtk/conanfile.py
+```
+
+A modified file with no diff, and a worktree object the index never hashed:
+`git status` is reporting its own stat cache, while the content it would commit
+is byte-for-byte what the commit already holds. Even that `M` is unreliable — in
+the state that actually bit this repository, `git status --short` printed
+nothing at all, which is how the CRLF survived review.
+
+What does say it plainly is `git ls-files --eol`,
+
+```console
+$ git ls-files --eol conan/recipes/vtk/conanfile.py
+i/lf    w/crlf  attr/text eol=lf      	conan/recipes/vtk/conanfile.py
+```
+
+the warning git emits the next time it touches the file,
+
+```text
+warning: in the working copy of 'conan/recipes/vtk/conanfile.py',
+         CRLF will be replaced by LF the next time Git touches it
+```
+
+and `conan export`, whose revision simply will not match the lockfile.
+
+This is not hypothetical. The working tree had CRLF in
+`conan/recipes/vtk/conanfile.py` and in the root `conanfile.py` while git stored
+LF for both, so the commit described one recipe and `conan.lock` pinned another
+(`#4b2e39c8…`, which the committed file cannot produce). Shipments still worked,
+because the bundle carried that revision's binary along with the lockfile entry;
+what broke was every attempt to build VTK *from the repository* — the Release
+package, any future recipe change, and the documented "build the recipe, then
+regenerate the lock" loop — because those builds produce `#983c7acf…`, a
+revision the lockfile did not mention, and the lockfile then rejects the binary
+that was just built. On a fresh clone the recipe exports as `#983c7acf…` while
+the lockfile still asks for `#4b2e39c8…`, so the VTK package that clone just
+spent 26 minutes building is invisible to the project until the lockfile is
+regenerated.
+
+`scripts/build-debug.sh` therefore treats the line endings as a build input
+rather than as housekeeping:
+
+* the `vtk` stage rewrites CRLF back to LF before exporting, and prints what it
+  changed. That is the same normalization git applies on the way in, so the
+  committed content — and the revision a clone produces — is unaffected, and
+  re-running the stage does nothing. Detection is a byte count rather than
+  `grep -q $'\r'`, which is what the first version of this guard used: Git for
+  Windows' grep treats CR as a line terminator and answered "no match" for the
+  recipe that `od -c` shows is full of `\r\n` (measured: `grep -c $'\r'` → 0,
+  `grep -cU $'\r'` → 104), so the guard turned itself off;
+* it then exports the recipe and compares the resulting revision with the
+  lockfile's, failing **before** it starts compiling instead of after it.
+  `conan export` is idempotent and prints `Exported: <ref>#<revision>` whether or
+  not that revision is already in the cache, so the check costs about a second:
+
+```console
+$ conan export conan/recipes/vtk --user=aoi --channel=stable
+Exported: vtk/9.5.0@aoi/stable#983c7acfa0cabef0ae92c662007b543f (…)
+```
+
+A mismatch then means exactly one of two things, and the message says which:
+stray carriage returns came back (the stage has just removed them, so re-run
+it), or the recipe was genuinely edited and `conan.lock` has to be regenerated
+as described above.
 
 ### pcre2 must not build pcre2grep (Windows / MSVC)
 
@@ -442,7 +567,7 @@ move binaries as a cache bundle instead of uploading them directly.
 #                            build used, otherwise the bundle ships without
 #                            qt/6.8.3 and without the private VTK package, and
 #                            the receiving machine still fails to configure
-#                            (or has to compile VTK itself, ~50 minutes)
+#                            (or has to compile VTK itself; ~26 minutes measured here)
 #      --build=missing
 #      -c:a tools.graph:skip_binaries=False
 conan install . --lockfile=conan.lock --build=missing -c:a tools.graph:skip_binaries=False -pr:h=conan/profiles/windows-msvc-v143-x64 -pr:b=conan/profiles/windows-msvc-v143-x64 -s:h build_type=Debug -o "&:with_shrimp=True" --output-folder=out/conan/debug --format=json > out/conan/debug/graph.json
@@ -507,7 +632,7 @@ consumer's closure is missing. A few references contribute two binaries each
 The largest single entry is the private `vtk/9.5.0@aoi/stable` package: 551 MB
 unpacked, and the reason the archive went from 2.5 GiB (Qt-only graph) to
 2.7 GiB. It is also the entry nothing else can stand in for, because it exists
-in no remote — a bundle without it does not fail here, it fails as a ~50 minute
+in no remote — a bundle without it does not fail here, it fails as a ~26 minute
 `conan create` on the receiving machine. `MUST_HAVE` in
 `scripts/package-debug-cache.sh` therefore names `vtk` first.
 
@@ -654,7 +779,7 @@ no `--build=missing` and no remote, so a package missing from the bundle is a
 hard error naming the missing ref, instead of quietly turning into a source
 build. On an empty home that source build would fail much further along, for a
 reason that looks unrelated to packaging — and with the private VTK package in
-the archive, the consumer does not spend ~50 minutes rebuilding it either.
+the archive, the consumer does not spend ~26 minutes rebuilding it either.
 `run` is the stage that separates "the bundle compiles" from "the bundle is
 usable": linking succeeds happily while the VTK or Qt runtime DLLs, or the
 OpenGL context, are still wrong.

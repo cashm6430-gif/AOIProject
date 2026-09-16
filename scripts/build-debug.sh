@@ -168,6 +168,61 @@ normalize_user_presets() {
   return 0
 }
 
+# --- recipe revision guards -------------------------------------------------
+# `vtk/9.5.0@aoi/stable` is the one dependency whose *bytes* this repository
+# supplies: Conan hashes the conanfile.py it reads off disk into the recipe
+# revision, and conan.lock pins that revision.  Anything that changes those
+# bytes -- a real edit, or just an editor rewriting the file with CRLF line
+# endings -- changes which build the lockfile describes.
+
+# The vtk revision conan.lock pins, or empty when it pins none -- which stage_vtk
+# treats as an error rather than as a reason to skip the check.
+#
+# The revision is 32 hex characters (Conan hashes with md5), and the lockfile
+# entry is "vtk/9.5.0@aoi/stable#<revision>%<timestamp>", so take everything
+# between '#' and '%'.  Do NOT hardcode the length: an earlier version of this
+# helper asked for 40 characters, matched nothing, and silently turned both this
+# guard and the skip test below into no-ops -- which cost a 26 minute rebuild
+# that nothing had asked for.
+locked_vtk_revision() {
+  sed -n 's/.*vtk\/9\.5\.0@aoi\/stable#\([0-9a-f]*\)%.*/\1/p' "$LOCKFILE" 2>/dev/null \
+    | head -1
+}
+
+# True when the file contains at least one carriage return.
+#
+# Deliberately not `grep -q $'\r' "$f"`: Git for Windows' grep treats CR as a
+# line terminator, so it answers "no match" for a file `od -c` shows is full of
+# \r\n.  Measured on this very recipe, while it was CRLF:
+#     grep -c $'\r'   -> 0        grep -cU $'\r'  -> 104
+# Counting bytes cannot be misread, and needs no --binary/GNU-only flag.
+file_has_cr() {
+  [ "$(wc -c < "$1")" -ne "$(tr -d '\r' < "$1" | wc -c)" ]
+}
+
+# Put CRLF back to LF before Conan hashes the file.
+#
+# `.gitattributes` declares `*.py text eol=lf`, so a clone always checks this
+# file out with LF.  What it does NOT do is report a worktree that has drifted
+# back to CRLF: git normalizes the comparison away, so `git diff` prints nothing
+# and `git hash-object` returns the blob the commit already stores, while
+# `conan export` produces a different revision and the pinned one resolves to
+# nothing.  Measured on this very file: LF exports as 983c7acf..., CRLF as
+# 4b2e39c8... .  The file is small and ASCII, and dropping carriage returns is
+# what git does on the way in anyway, so this is a no-op for the committed
+# content -- it just makes the build agree with a fresh clone.
+normalize_recipe_eol() {
+  local f rel
+  for f in "$@"; do
+    [ -f "$f" ] || continue
+    file_has_cr "$f" || continue
+    rel="${f#"$ROOT_UNIX"/}"
+    sed -i 's/\r$//' "$f" || return 1
+    printf '  [eol] %s: CRLF -> LF (conan hashes these bytes into the recipe revision)\n' "$rel"
+  done
+  return 0
+}
+
 require_conan() {
   if [ -z "${AOI_CONAN:-}" ] || [ ! -x "${AOI_CONAN:-}" ]; then
     printf 'ERROR: conan not found. Set AOI_CONAN=/path/to/conan(.exe).\n' >&2
@@ -307,14 +362,77 @@ stage_deps() {
 # ConanCenter has no VTK recipe in the configuration this project needs (shared,
 # Qt-enabled, same MSVC / Qt ABI), so conan/recipes/vtk builds it from source and
 # publishes it as vtk/9.5.0@aoi/stable.  It is by far the longest step in the
-# pipeline, hence the skip when the cache already holds a matching Debug package
-# (AOI_FORCE_VTK=1 rebuilds it).
+# pipeline (~26 minutes measured on this machine), hence the skip when the cache
+# already holds a matching Debug package (AOI_FORCE_VTK=1 rebuilds it).
+#
+# "Matching" means matching the recipe revision conan.lock pins, not merely
+# "a Debug vtk exists".  Conan keys binaries by (recipe revision, package id),
+# so a rebuilt recipe leaves the previous binary in the cache under a revision
+# nothing resolves any more: the old revision-blind test answered yes and
+# skipped the rebuild the new lockfile required, and the failure then surfaced
+# much later in `deps` as "Package 'vtk/9.5.0@aoi/stable' not resolved".
 stage_vtk() {
   say "vtk: conan create conan/recipes/vtk -> vtk/9.5.0@aoi/stable (Debug)"
   require_conan
+
+  # Both files Conan reads out of this repository.  Each has been CRLF in the
+  # working tree at some point while git stored LF for it.
+  normalize_recipe_eol "$ROOT_UNIX/conan/recipes/vtk/conanfile.py" \
+                       "$ROOT_UNIX/conanfile.py" || return 1
+
+  # Export first and compare with the lockfile, so a mismatch costs a second
+  # instead of a compile: `conan export` is idempotent and prints the revision
+  # whether or not it is already in the cache.
+  local export_log="$LOG_DIR/vtk-export.log" locked_rev disk_rev export_rc=0
+  # Capture the status with `|| rc=$?` rather than `if ! cmd`: inside the then
+  # block of `if ! cmd` the `!` has already reset $? to 0, so the message below
+  # would have reported a failure as "exit 0".
+  "$AOI_CONAN" export "$ROOT/conan/recipes/vtk" \
+      --user=aoi --channel=stable --no-remote > "$export_log" 2>&1 || export_rc=$?
+  if [ "$export_rc" -ne 0 ]; then
+    printf 'ERROR: conan export failed (exit %d). See %s\n' "$export_rc" "$export_log" >&2
+    tail -n 5 "$export_log" >&2
+    return 1
+  fi
+  disk_rev="$(sed -n 's/^Exported: vtk\/9\.5\.0@aoi\/stable#\([0-9a-f]*\) .*/\1/p' \
+                  "$export_log" | tail -1)"
+  locked_rev="$(locked_vtk_revision)"
+
+  # A guard that cannot read one of the two revisions must stop the stage, not
+  # wave it through: `conan create` would then run for ~26 minutes and anything
+  # that depends on the revision would be decided by accident.
+  if [ -z "$locked_rev" ]; then
+    printf 'ERROR: conan.lock has no vtk/9.5.0@aoi/stable revision to compare against.\n' >&2
+    printf '       A lockfile resolved with -o "&:with_shrimp=True" always has one, so\n' >&2
+    printf '       this file is not the lockfile the build expects -- regenerate it as\n' >&2
+    printf '       docs/build.md describes ("Editing this recipe invalidates conan.lock").\n' >&2
+    return 1
+  fi
+  if [ -z "$disk_rev" ]; then
+    printf 'ERROR: could not read the exported revision out of %s.\n' "$export_log" >&2
+    printf '       Expected a line "Exported: vtk/9.5.0@aoi/stable#<revision>".\n' >&2
+    tail -n 5 "$export_log" >&2
+    return 1
+  fi
+
+  if [ "$locked_rev" != "$disk_rev" ]; then
+    printf '\nERROR: conan.lock pins a different vtk recipe revision than this worktree.\n' >&2
+    printf '       conan.lock : vtk/9.5.0@aoi/stable#%s\n' "$locked_rev" >&2
+    printf '       this tree  : vtk/9.5.0@aoi/stable#%s\n' "$disk_rev" >&2
+    printf '       The revision is a checksum of conan/recipes/vtk/conanfile.py as it sits\n' >&2
+    printf '       on disk, so a real edit to that file lands here -- regenerate the\n' >&2
+    printf '       lockfile as docs/build.md describes ("Editing this recipe invalidates\n' >&2
+    printf '       conan.lock"), after this stage has built the new package.\n' >&2
+    printf '       If the recipe was NOT edited, the worktree had stray CRLF line endings:\n' >&2
+    printf '       this stage strips them before exporting, so simply re-run it.\n' >&2
+    return 1
+  fi
+  printf 'recipe revision: %s (matches conan.lock)\n' "$disk_rev"
+
+  # Only the locked revision counts as "already built".
   if [ "$AOI_FORCE_VTK" != "1" ]; then
-    if "$AOI_CONAN" list 'vtk/9.5.0@aoi/stable:*' -c 2>/dev/null | grep -q 'build_type: Debug'; then
-      printf 'vtk/9.5.0@aoi/stable (Debug) is already in the cache -- skipping.\n'
+    if "$AOI_CONAN" list "vtk/9.5.0@aoi/stable#${locked_rev}:*" -c 2>/dev/null | grep -q 'build_type: Debug'; then
+      printf 'vtk/9.5.0@aoi/stable#%s (Debug) is already in the cache -- skipping.\n' "${locked_rev:0:12}"
       printf 'AOI_FORCE_VTK=1 rebuilds it.\n'
       return 0
     fi

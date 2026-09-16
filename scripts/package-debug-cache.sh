@@ -47,7 +47,7 @@ ARCHIVE="$OUT/conan-cache-debug.tgz"
 #
 # Shrimp is ON by default (AOI_BUILD_SHRIMP), so the Qt-only graph is no longer
 # the closure the build needs: without VTK in the bundle the receiving machine
-# has to run `conan create conan/recipes/vtk` itself -- a ~50 minute compile that
+# has to run `conan create conan/recipes/vtk` itself -- a ~26 minute compile that
 # also needs a reachable copy of the 50 MB VTK source archive.
 AOI_WITH_SHRIMP="${AOI_WITH_SHRIMP:-1}"
 
@@ -145,7 +145,7 @@ has_binary() {
 # vtk is listed first because it is the one entry nothing else can substitute
 # for: it is a *private* package (@aoi/stable), so it exists in no remote and on
 # no other machine.  Leaving it out of the pkglist does not fail here -- it fails
-# as a 50-minute `conan create` on the receiving side.
+# as a 26-minute `conan create` on the receiving side.
 MUST_HAVE="vtk qt pcre2 zlib opencv pcl catch2 boost fmt spdlog openssl sqlite3
            freetype libpng harfbuzz glib libpq eigen taskflow double-conversion
            brotli md4c lz4 bzip2 libiconv libffi"

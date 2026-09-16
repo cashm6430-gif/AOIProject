@@ -22,7 +22,7 @@
 #   * pkglist resolved while Qt was optional     -> no qt/6.8.3 shipped
 #   * pkglist without -o "&:with_shrimp=True"    -> no private vtk shipped, so
 #                                                   the consumer still has to
-#                                                   build VTK for ~50 minutes
+#                                                   build VTK for ~26 minutes
 #   * pkglist without -c:a skip_binaries=False   -> 12 of 52 binaries
 #   * msys2 etc/mtab aborted `cache save`        -> 780 MB truncated archive
 #
