@@ -42,6 +42,30 @@
       }
     },
     {
+      "name": "vs2022-debug",
+      "generator": "Visual Studio 17 2022",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "binaryDir": "${sourceDir}/out/build/vs2022-debug",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/vs2022-debug/build/generators/conan_toolchain.cmake"
+      }
+    },
+    {
+      "name": "vs2022-relwithdebuginfo",
+      "generator": "Visual Studio 17 2022",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "binaryDir": "${sourceDir}/out/build/vs2022-relwithdebuginfo",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/out/conan/vs2022-release/build/generators/conan_toolchain.cmake"
+      }
+    },
+    {
       "name": "vs2022-release",
       "generator": "Visual Studio 17 2022",
       "architecture": {
@@ -66,6 +90,16 @@
     {
       "name": "build-release",
       "configurePreset": "release"
+    },
+    {
+      "name": "build-vs2022-debug",
+      "configurePreset": "vs2022-debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "build-vs2022-relwithdebuginfo",
+      "configurePreset": "vs2022-relwithdebuginfo",
+      "configuration": "RelWithDebInfo"
     },
     {
       "name": "build-vs2022-release",
