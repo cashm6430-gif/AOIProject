@@ -4,6 +4,44 @@ from conan import ConanFile
 from conan.tools.cmake import CMake, CMakeDeps, CMakeToolchain, cmake_layout
 from conan.tools.files import get, save
 
+# --- VTK 9.5.0 sources ------------------------------------------------------
+#
+# Upstream publishes this archive at
+#     https://www.vtk.org/files/release/9.5/VTK-9.5.0.tar.gz
+# but neither that host nor gitlab.kitware.com (the same tag as a GitLab
+# archive) is reachable from this network: a direct connection times out, and
+# through the VPN the TLS handshake never completes -- measured with curl
+# (schannel) and with Python's OpenSSL stack.
+#
+# The GitHub tag archive used below is a complete source tree, not a reduced
+# one: VTK carries no submodules at v9.5.0 (there is no .gitmodules) and its
+# .gitattributes marks only .git* and .hooks* as export-ignore, so nothing the
+# build touches is missing.  Measured: 27056 entries, top directory VTK-9.5.0/.
+#
+# A checksum is required, not decorative.  SourcesCachingDownloader disables
+# core.sources:download_cache entirely when a recipe calls download() without
+# one ("Cannot cache download() without sha256 checksum"), so without the pin
+# every build -- including an otherwise fully offline one -- would go to the
+# network for this tarball.
+#
+# All URLs must serve the same bytes; that is what makes the mirror list safe
+# and what the checksum verifies (the Chinese GitHub gateways were checked
+# byte-for-byte against each other on a small file: identical).  Do NOT add the
+# official vtk.org tarball to this list -- it is a different byte stream, so it
+# cannot share this checksum.  A machine that can reach vtk.org should swap the
+# list and recompute the hash instead.
+VTK_SHA256 = "3d311ff2608e971d40222ae01016d404fb07d746292f77edd86786912767a9c1"
+VTK_URLS = [
+    # Reachable from this network (direct, ~940 KB/s measured for the 50 MB
+    # archive).  ghfast.top does not implement Range, which is only relevant to
+    # scripts/prefetch-sources.sh, not to Conan.
+    "https://ghfast.top/https://github.com/Kitware/VTK/archive/refs/tags/v9.5.0.tar.gz",
+    "https://gh-proxy.com/https://github.com/Kitware/VTK/archive/refs/tags/v9.5.0.tar.gz",
+    # Reachable from a normal corporate/university network; both time out here.
+    "https://github.com/Kitware/VTK/archive/refs/tags/v9.5.0.tar.gz",
+    "https://codeload.github.com/Kitware/VTK/tar.gz/refs/tags/v9.5.0",
+]
+
 
 class VtkConan(ConanFile):
     name = "vtk"
@@ -22,7 +60,8 @@ class VtkConan(ConanFile):
 
     def source(self):
         get(self,
-            url="https://www.vtk.org/files/release/9.5/VTK-9.5.0.tar.gz",
+            url=VTK_URLS,
+            sha256=VTK_SHA256,
             strip_root=True)
 
     def generate(self):
