@@ -77,4 +77,12 @@ if(AOI_BUILD_TASKCONTROL_TESTS)
     target_link_libraries(TaskControlTests PRIVATE AOI::TaskControl Catch2::Catch2WithMain)
     add_test(NAME TaskControl.CoreArchitecture COMMAND TaskControlTests)
     set_target_properties(TaskControlTests PROPERTIES FOLDER "Tests")
+
+    # ctest launches this exe straight from the build tree with no Conan shell
+    # active, and TaskControl is a SHARED library that links Qt6::Core / Qt6::Gui.
+    # Without the DLL closure beside the exe the process dies before main() with
+    #   0xC0000135 (STATUS_DLL_NOT_FOUND)
+    # because Qt6Cored.dll / Qt6Guid.dll live under the Conan package bin
+    # directories, which are not on PATH.  Same treatment Shrimp already gets.
+    aoi_deploy_runtime_dependencies(TaskControlTests)
 endif()

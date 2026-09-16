@@ -1,1 +1,14 @@
 * text=auto
+
+# Scripts are checked out with LF on every platform.
+#
+# The repository is `* text=auto` and the machines that use it run with
+# core.autocrlf=true, so without these rules a fresh clone hands out CRLF
+# copies of every script.  Git for Windows' bash happens to tolerate the stray
+# carriage return (verified: shebangs, `set --` argument lists and `x="$(...)"`
+# assignments all still behave), but that is a property of this one shell, not
+# of the scripts: bash on Linux, WSL and macOS strips nothing and dies with
+#     $'\r': command not found
+# The files are small and ASCII, so pinning LF costs nothing.
+*.sh  text eol=lf
+*.py  text eol=lf

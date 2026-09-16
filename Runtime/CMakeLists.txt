@@ -25,4 +25,9 @@ if(AOI_BUILD_TASKCONTROL_TESTS)
     target_link_libraries(RuntimeTests PRIVATE AOI::Runtime Catch2::Catch2WithMain)
     add_test(NAME Runtime.Scheduler COMMAND RuntimeTests)
     set_target_properties(RuntimeTests PROPERTIES FOLDER "Tests")
+
+    # See TaskControl/CMakeLists.txt: AOI::Runtime links AOI::TaskControl, which
+    # is a SHARED library pulling in Qt6, so ctest needs the DLL closure beside
+    # the exe or it fails with 0xC0000135 before main().
+    aoi_deploy_runtime_dependencies(RuntimeTests)
 endif()

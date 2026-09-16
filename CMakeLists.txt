@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.28)
 
 project(AOIProject VERSION 0.1.0 LANGUAGES CXX)
 
-option(AOI_BUILD_SHRIMP "Build the Shrimp Qt application" OFF)
+option(AOI_BUILD_SHRIMP "Build the Shrimp Qt application" ON)
 option(AOI_BUILD_RUNTIME "Build the headless multi-workpiece runtime" ON)
 option(AOI_BUILD_TASKCONTROL_TESTS "Build TaskControl and Runtime Catch2 regression tests" OFF)
 
@@ -66,5 +66,33 @@ if(AOI_BUILD_RUNTIME)
 endif()
 
 if(AOI_BUILD_SHRIMP)
+    # Shrimp is the application this project exists to ship, so it is built by
+    # default.  Two of its dependencies are conditional in conanfile.py -- Qt
+    # and the private VTK package -- and a mismatch between the Conan graph and
+    # this option otherwise surfaces as a generic find_package() failure inside
+    # Shrimp.  Name the missing piece and the command that provides it instead.
+    #
+    # Turn it off with -DAOI_BUILD_SHRIMP=OFF for a core-only build of
+    # TaskControl + Runtime (+ tests), which needs neither Qt nor VTK... except
+    # that TaskControl does need Qt (its context stores QVariant, recipes are
+    # parsed with QJsonArray), so "core-only" means -o "&:with_qt=True".
+    find_package(Qt6 QUIET COMPONENTS Core)
+    if(NOT Qt6_FOUND)
+        message(FATAL_ERROR
+            "AOI_BUILD_SHRIMP=ON but Qt is not in the Conan graph. "
+            "Re-run conan install with -o \"&:with_shrimp=True\" using the same "
+            "-of folder as this preset, then reconfigure.")
+    endif()
+
+    # VTK is the private package built from conan/recipes/vtk; there is no
+    # ConanCenter recipe for the configuration Shrimp needs.
+    find_package(VTK QUIET COMPONENTS CommonCore)
+    if(NOT VTK_FOUND)
+        message(FATAL_ERROR
+            "AOI_BUILD_SHRIMP=ON but the private VTK package is missing from the "
+            "Conan graph. Build it with `bash scripts/build-debug.sh vtk` (which "
+            "runs conan create conan/recipes/vtk), then re-run the deps and "
+            "configure stages.")
+    endif()
     add_subdirectory(Shrimp)
 endif()
