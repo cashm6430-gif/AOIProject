@@ -91,12 +91,13 @@ ENABLE_TESTS="${AOI_BUILD_TASKCONTROL_TESTS:-ON}"
 # TaskControl is not headless.  It stores its runtime data in QVariant/QHash
 # (core/AlgorithmContext.h), parses recipes with QJsonArray
 # (core/AlgorithmIO.h), and TaskControl/CMakeLists.txt line 1 is
-#   find_package(Qt6 REQUIRED COMPONENTS Core Gui)
-# Runtime links AOI::TaskControl PUBLIC and both test executables link it too,
-# so every target here needs Qt and conanfile.py requires qt/6.8.3 without
-# asking.  There is deliberately no AOI_WITH_QT: an option that can only ever be
-# 1 is a trap, and with_qt=False used to resolve a Qt-less graph and then die at
-# TaskControl/CMakeLists.txt:1 with
+#   find_package(Qt6 REQUIRED COMPONENTS Core)
+# Core only -- TaskControl has no GUI type in it; Qt6::Gui/Widgets belong to
+# Shrimp.  Runtime links AOI::TaskControl PUBLIC and both test executables link
+# it too, so every target here needs Qt and conanfile.py requires qt/6.8.3
+# without asking.  There is deliberately no AOI_WITH_QT: an option that can only
+# ever be 1 is a trap, and with_qt=False used to resolve a Qt-less graph and then
+# die at TaskControl/CMakeLists.txt:1 with
 #   Could not find a package configuration file provided by "Qt6"
 #
 # Shrimp is the project's application -- the Qt GUI that renders point clouds

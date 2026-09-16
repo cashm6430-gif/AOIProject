@@ -157,9 +157,9 @@ it off with `AOI_BUILD_TASKCONTROL_TESTS=OFF`). Two executables are registered:
 
 Test executables need their **DLL closure deployed beside them**. ctest launches
 them straight out of the build tree with no Conan shell active, and
-`TaskControl` is a `SHARED` library that links `Qt6::Core` / `Qt6::Gui`, so
-nothing tells the loader where `Qt6Cored.dll`, `Qt6Guid.dll` or the OpenCV DLLs
-are. The process then dies *before* `main()`:
+`TaskControl` is a `SHARED` library that links `Qt6::Core`, so nothing tells the
+loader where `Qt6Cored.dll` or the OpenCV / PCL DLLs are. The process then dies
+*before* `main()`:
 
 ```
 Test #1: TaskControl.CoreArchitecture .....Exit code 0xc0000135***Exception: 573.66 sec
@@ -196,9 +196,28 @@ Qt 6.8.3 is **unconditional**. `conanfile.py` requires it without asking, becaus
 `QVariant`/`QHash` (`TaskControl/core/AlgorithmContext.h`), recipes are parsed
 with `QJsonArray` (`TaskControl/core/AlgorithmIO.h`), the plug-in loader is built
 on Qt, and `TaskControl/CMakeLists.txt` line 1 is
-`find_package(Qt6 REQUIRED COMPONENTS Core Gui)`. `Runtime` links
+`find_package(Qt6 REQUIRED COMPONENTS Core)`. `Runtime` links
 `AOI::TaskControl` PUBLIC and both test executables link it as well, so every
 target in this repository needs Qt and no configuration exists without it.
+
+**`TaskControl` links `Qt6::Core` only -- never `Qt6::Gui`.** It is the algorithm
+/ runtime library and never touches a surface: 53 of its 66 source files use Qt,
+and every one of those types is Core (`QJsonObject`, `QJsonArray`, `QString`,
+`QVariant`, `QHash`, `QMap`, `QFile`, `QDir`, `QElapsedTimer`, `QPluginLoader`,
+`QReadWriteLock`, `QCoreApplication`); there is not a single `QImage`, `QPixmap`,
+`QPainter`, `QColor` or `QFont` in it, and no `.ui`/`.qrc`. `Qt6::Gui` used to be
+declared here and has been removed. Two notes for whoever is tempted to add it
+back:
+
+- It bought nothing. The MSVC linker prunes import entries for DLLs whose symbols
+  are never referenced, so `TaskControld.dll` never imported `Qt6Guid.dll` even
+  while `Qt6::Gui` was on the link line -- the declaration was simply wrong, not
+  load-bearing.
+- It cost something. An unused component is still a **configure-time
+  requirement**: `find_package(Qt6 REQUIRED COMPONENTS Core Gui)` fails on a Qt
+  installation built without Gui, and it blurs which target actually needs a GUI
+  toolkit. `Shrimp` needs one (`Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network
+  Qt6::OpenGLWidgets`) and declares its own.
 
 **There is deliberately no `with_qt` option.** One was added and then removed: it
 cannot ever be `False`. `with_qt=False` resolves a Qt-less graph successfully —

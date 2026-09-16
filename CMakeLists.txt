@@ -67,15 +67,16 @@ endif()
 
 if(AOI_BUILD_SHRIMP)
     # Shrimp is the application this project exists to ship, so it is built by
-    # default.  Two of its dependencies are conditional in conanfile.py -- Qt
-    # and the private VTK package -- and a mismatch between the Conan graph and
-    # this option otherwise surfaces as a generic find_package() failure inside
-    # Shrimp.  Name the missing piece and the command that provides it instead.
+    # default.  VTK is its only conditional dependency in conanfile.py -- Qt is
+    # unconditional, because TaskControl links Qt6::Core -- and a mismatch
+    # between the Conan graph and this option otherwise surfaces as a generic
+    # find_package() failure inside Shrimp.  Name the missing piece and the
+    # command that provides it instead.
     #
     # Turn it off with -DAOI_BUILD_SHRIMP=OFF for a core-only build of
-    # TaskControl + Runtime (+ tests), which needs neither Qt nor VTK... except
-    # that TaskControl does need Qt (its context stores QVariant, recipes are
-    # parsed with QJsonArray), so "core-only" means -o "&:with_qt=True".
+    # TaskControl + Runtime (+ tests).  That still needs Qt in the graph (see
+    # conanfile.py: the context stores QVariant, recipes are parsed with
+    # QJsonArray), so the core-only install passes no -o at all.
     find_package(Qt6 QUIET COMPONENTS Core)
     if(NOT Qt6_FOUND)
         message(FATAL_ERROR

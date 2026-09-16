@@ -1,4 +1,11 @@
-find_package(Qt6 REQUIRED COMPONENTS Core Gui)
+# TaskControl is Core-only *by design*.  It is the algorithm / runtime library
+# and never touches a surface, painter or image: every Qt type it uses lives in
+# Qt6Core (QJsonObject/QJsonArray, QString/QStringList, QVariant, QHash/QMap,
+# QList/QVector/QSet, QFile/QDir/QFileInfo, QElapsedTimer, QPluginLoader,
+# QReadWriteLock, QMetaType, QCoreApplication).  Only Shrimp needs a GUI toolkit.
+# Do not add Gui/Widgets back: an unused component widens the configure-time
+# requirement and hides which target actually needs Qt6::Gui.
+find_package(Qt6 REQUIRED COMPONENTS Core)
 find_package(Eigen3 CONFIG REQUIRED)
 find_package(OpenCV CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
@@ -52,7 +59,6 @@ target_include_directories(TaskControl
 target_link_libraries(TaskControl
     PUBLIC
         Qt6::Core
-        Qt6::Gui
         Eigen3::Eigen
         opencv::opencv
         spdlog::spdlog
@@ -79,10 +85,11 @@ if(AOI_BUILD_TASKCONTROL_TESTS)
     set_target_properties(TaskControlTests PROPERTIES FOLDER "Tests")
 
     # ctest launches this exe straight from the build tree with no Conan shell
-    # active, and TaskControl is a SHARED library that links Qt6::Core / Qt6::Gui.
+    # active, and TaskControl is a SHARED library that links Qt6::Core.
     # Without the DLL closure beside the exe the process dies before main() with
     #   0xC0000135 (STATUS_DLL_NOT_FOUND)
-    # because Qt6Cored.dll / Qt6Guid.dll live under the Conan package bin
-    # directories, which are not on PATH.  Same treatment Shrimp already gets.
+    # because Qt6Cored.dll and the OpenCV / PCL DLLs live under the Conan
+    # package bin directories, which are not on PATH.  Same treatment Shrimp
+    # already gets.
     aoi_deploy_runtime_dependencies(TaskControlTests)
 endif()

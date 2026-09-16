@@ -87,7 +87,10 @@ class AOIProjectConan(ConanFile):
         # QVariant/QHash behind QReadWriteLock (core/AlgorithmContext.*), recipes
         # are parsed with QJsonArray (core/AlgorithmIO.h), the plugin loader is
         # QPluginLoader -- and TaskControl/CMakeLists.txt line 1 is
-        #     find_package(Qt6 REQUIRED COMPONENTS Core Gui)
+        #     find_package(Qt6 REQUIRED COMPONENTS Core)
+        # (Core, not Gui: TaskControl is the algorithm/runtime library and has no
+        # GUI type anywhere in it.  Only Shrimp -- the Qt application -- needs
+        # Qt6::Gui/Widgets, and it declares them itself.)
         # Runtime links AOI::TaskControl PUBLIC and both test executables link it
         # too, so no target in this repository can be configured without Qt.
         #
