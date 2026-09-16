@@ -5,6 +5,55 @@ compiler=msvc
 compiler.version=194
 compiler.cppstd=20
 compiler.runtime=dynamic
+# build_type 必须写在 profile 里，而且必须是 Release。
+#
+# 这个 profile 同时被用于两个 context（-pr:h=... -pr:b=...），而 build context
+# 需要有一个具体的 build_type。构建脚本用 "-s:h build_type=Debug" 只覆盖 host，
+# 于是 final 组合是 host=Debug / build=Release。
+#
+# 不写它不是"中性"的：build context 会解析成 build_type=None，凡是 recipe 里
+# 按 build_type 分支的逻辑都会走错路。这次炸掉的是 winflexbison/2.5.25 ——
+# 它的 package() 是
+#     if self.settings.build_type in ("Release", "Debug"):
+#         exec_build_path = os.path.join(self.source_folder, "bin")   # 随源码附带的预编译 exe
+#     else:
+#         exec_build_path = self.build_folder                         # 自己编译出来的
+# build_type=None 时它走了 else 分支，从未拷进 win_flex.exe / win_bison.exe，
+# 包里只剩下 CMake try_compile 掉在 build 目录里的 CMakeCCompilerId.exe。
+# 环境是对的（PATH 与 LEX/YACC 都指向那个 bin 目录），但程序根本不存在，于是
+# libpq/17.11 在
+#     meson.build:327:7: ERROR: Program 'flex win_flex' not found
+# 处失败，而且重试多少次都一样。
+#
+# 附带好处：build_type 确定之后，build 侧的工具包能对上 ConanCenter 的官方
+# 二进制，直接下载而不是从源码编（实测 libiconv/m4/zlib/pkgconf/ninja/
+# winflexbison/libffi/libgettext 都变成 Download；autoconf/automake/cmake/
+# meson/msys2/strawberryperl 仍是 Cache，不受影响）。
+build_type=Release
+
+[options]
+# pcre2/10.42 必须关掉 pcre2grep，否则 Debug 构建必然在链接阶段死掉。
+#
+# 原因：pcre2 的 recipe 用 CMakeToolchain.variables 无条件把
+#   PCRE2_SUPPORT_LIBZ / PCRE2_SUPPORT_LIBBZ2 写成 True 放进 CMake 缓存，
+# 绕过了上游 CMakeLists.txt 的 IF(ZLIB_FOUND) 守卫。上游随后
+#   448-456 行: SET(PCRE2GREP_LIBS ... ${ZLIB_LIBRARIES}   ${BZIP2_LIBRARIES})
+#   918 行     : TARGET_LINK_LIBRARIES(pcre2grep pcre2-posix ${PCRE2GREP_LIBS})
+# 而在 Conan 的 CMakeDeps + 单配置 Ninja 组合下，那两个 legacy 变量解析成
+# IMPORTED target 名（ZLIB::ZLIB / BZip2::BZip2）后并没有落到 pcre2grep 的
+# 链接行（实测：使用点处 PCRE2GREP_LIBS 非空，build.ninja 的 LINK_LIBRARIES
+# 里却没有它们）。与此同时 config.h 由同一个 IF 块带入了 SUPPORT_LIBZ /
+# SUPPORT_LIBBZ2 宏，pcre2grep.c.obj 因此引用了 gzread / gzclose / gzopen /
+# BZ2_bzopen / BZ2_bzread / BZ2_bzclose / BZ2_bzerror 共 7 个符号却无处解析：
+#   pcre2grep.exe : fatal error LNK1120: 7 个无法解析的外部命令
+# 这是确定性错误，重试 40 次只会重复 40 次。
+#
+# 关掉 pcre2grep 之后，recipe 的 configure() 会连带删掉 with_zlib / with_bzip2，
+# pcre2 不再依赖 zlib 与 bzip2（zlib 仍因其它包留在图里）。本项目只需要 pcre2
+# 的静态库给 Qt 用，pcre2grep 是个命令行 grep 工具，本来就不需要。
+# 实测：PCRE2_SUPPORT_LIBZ=OFF / PCRE2_SUPPORT_LIBBZ2=OFF 后链接一次通过，
+# 产出 704512 字节的 pcre2grep.exe。
+pcre2/*:build_pcre2grep=False
 
 [conf]
 tools.cmake.cmaketoolchain:generator=Ninja
