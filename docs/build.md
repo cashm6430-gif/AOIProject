@@ -12,15 +12,18 @@ $ bash scripts/build-debug.sh deps configure  # or run individual stages
 $ bash scripts/build-debug.sh run             # Shrimp --selftest only
 ```
 
-Stages: `vtk` `deps` `configure` `build` `test` `run` `package`. Every stage is
-re-runnable on its own; a failing one stops the chain and names the stage.
+Stages: `vtk` `vtk-release` `deps` `configure` `build` `test` `run` `package`.
+Every stage is re-runnable on its own; a failing one stops the chain and names the
+stage.
 
 The `vtk` stage builds the private VTK package and skips itself when the cache
-already holds a matching Debug package. The chain then compiles **the whole
-project, Shrimp included**: Shrimp is the Qt application this repository exists
-to ship, so `AOI_BUILD_SHRIMP` is `ON` by default and the driver configures with
-`-o "&:with_shrimp=True"`. Set `AOI_WITH_SHRIMP=0` for a core-only loop
-(TaskControl + Runtime + tests), which then needs Qt but not VTK.
+already holds a matching package for the requested build type (`vtk-release` is
+the same stage with `AOI_VTK_BUILD_TYPE=Release`; see *The bundle covers one
+build type* for why that switch has to be reachable). The chain then compiles
+**the whole project, Shrimp included**: Shrimp is the Qt application this
+repository exists to ship, so `AOI_BUILD_SHRIMP` is `ON` by default and the driver
+configures with `-o "&:with_shrimp=True"`. Set `AOI_WITH_SHRIMP=0` for a core-only
+loop (TaskControl + Runtime + tests), which then needs Qt but not VTK.
 
 | script | job |
 |---|---|
@@ -242,17 +245,43 @@ Qt-enabled, same MSVC / Qt ABI), so `conan/recipes/vtk` builds VTK 9.5.0 from
 source and publishes it as `vtk/9.5.0@aoi/stable`. It is the only package in the
 graph that does not come from ConanCenter. `scripts/build-debug.sh` gives it its
 own first stage, which skips itself whenever the cache already holds a matching
-Debug package — *matching* includes the recipe revision `conan.lock` pins, since
-Conan keys binaries by revision: a rebuilt recipe leaves the previous binary in
-the cache under a revision nothing resolves any more, and a skip test that only
-asked "is there any Debug vtk?" answered yes and silently kept it.
+package for the build type it was asked to produce — *matching* includes the
+recipe revision `conan.lock` pins, since Conan keys binaries by revision: a
+rebuilt recipe leaves the previous binary in the cache under a revision nothing
+resolves any more, and a skip test that only asked "is there any Debug vtk?"
+answered yes and silently kept it.
 
 ```console
-$ bash scripts/build-debug.sh vtk                # skips when cached
+$ bash scripts/build-debug.sh vtk                   # Debug (AOI_VTK_BUILD_TYPE)
+$ bash scripts/build-debug.sh vtk-release           # same stage, Release
 $ AOI_FORCE_VTK=1 bash scripts/build-debug.sh vtk   # rebuild anyway
 ```
 
-By hand (`-s:h build_type=Release` for the Release package):
+The build type is a stage input (`AOI_VTK_BUILD_TYPE`, default `Debug`), not a
+constant inside the stage, and it is validated before anything compiles. That is
+not tidiness: the delivery bundle carries only the binaries this driver resolves,
+i.e. Debug, so a colleague who needs a Release build has to create
+`vtk/9.5.0@aoi/stable` for Release themselves and upload it to the company
+remote. With the build type baked in they would have had to run `conan create` by
+hand — outside `normalize_recipe_eol()` and the revision guard, which are exactly
+the two things that make that rebuild land on the revision `conan.lock` pins. The
+revision does not depend on the build type, so `vtk-release` checks the same
+value `vtk` does.
+
+Release needs a *Release* Qt, which **this machine's cache does not have** (0
+Release packages against 1 Debug), so `vtk-release` here gets past the recipe
+guard and then stops with:
+
+```
+ERROR: Missing prebuilt package for 'qt/6.8.3'
+ERROR: conan create failed (exit 1). See out/vtk-create-release.log
+```
+
+That failure is the stage working, not failing: it costs seconds and names the
+one thing the machine lacks, whereas a hand-written `conan create` costs the
+26-minute VTK compile before reaching the same conclusion.
+
+By hand (equivalent, but without the guard):
 
 ```powershell
 conan create conan/recipes/vtk --user=aoi --channel=stable -pr:h=conan/profiles/windows-msvc-v143-x64 -pr:b=conan/profiles/windows-msvc-v143-x64 -s:h build_type=Debug
@@ -653,6 +682,29 @@ fails loudly instead of at the far end of the transfer.
 `conan cache save` stores recipes and binaries together, so the bundle is
 self-contained. Build tools such as `msys2` are ~245 MB; drop them from
 `pkglist.json` first if the bundle has to stay small.
+
+### The bundle covers one build type
+
+Those 53 binaries describe the graph that was resolved — host **Debug**. A Release
+build of the same project needs Release binaries for every host requirement, and
+they are not in the archive. Exactly one of them needs a person:
+
+| package | where the Release binary comes from |
+|---|---|
+| `qt`, `zlib`, `boost`, `openssl`, … | ConanCenter, or the company remote |
+| `vtk/9.5.0@aoi/stable` | whoever has a **Release Qt** must create and upload it |
+
+```bash
+bash scripts/build-debug.sh vtk-release        # guard: refuses to compile unless
+                                               # the recipe revision matches conan.lock
+conan upload 'vtk/9.5.0@aoi/stable' -r <remote> --confirm
+```
+
+`conan.lock` pins **recipe revisions only**, so the Release package lands under the
+same revision as the Debug one, its package id differs, and the existing lockfile
+keeps working. **Do not regenerate the lockfile afterwards** — instructions that
+tell the receiving side to run `conan lock create` are wrong and break the Debug
+build that already works.
 
 ### `conan cache save` cannot archive msys2's `etc/mtab`
 

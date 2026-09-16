@@ -5,7 +5,9 @@
 #   bash scripts/build-debug.sh [stage ...]
 #
 # Stages (default: all, in this order):
-#   vtk        conan create conan/recipes/vtk -> vtk/9.5.0@aoi/stable (Debug)
+#   vtk        conan create conan/recipes/vtk -> vtk/9.5.0@aoi/stable
+#              (build type = AOI_VTK_BUILD_TYPE, default Debug)
+#   vtk-release  the same stage with AOI_VTK_BUILD_TYPE=Release
 #   deps       conan install --build=missing  (retries transient failures only)
 #   configure  cmake --preset debug
 #   build      cmake --build --preset build-debug
@@ -107,6 +109,21 @@ ENABLE_TESTS="${AOI_BUILD_TASKCONTROL_TESTS:-ON}"
 # still links Qt but keeps VTK out of the graph entirely.
 AOI_WITH_SHRIMP="${AOI_WITH_SHRIMP:-1}"
 AOI_FORCE_VTK="${AOI_FORCE_VTK:-0}"
+
+# Which build type the vtk stage produces.  Release is not an afterthought: the
+# delivery bundle (out/conan-cache-debug.tgz) holds only the binaries this driver
+# resolves, i.e. Debug, and vtk/9.5.0@aoi/stable is the one package a colleague
+# cannot get from ConanCenter -- so whoever has a Release qt (this machine does
+# not: its cache holds 0 Release qt packages) has to create that package for
+# Release and upload it to the company remote.
+#
+# The build type therefore lives in the stage's input, not inside the stage:
+# hardcoding Debug meant that Release rebuild had to be a hand-written
+# `conan create`, which runs outside normalize_recipe_eol() and the revision
+# guard -- and those two are exactly what makes the result land on the revision
+# conan.lock pins.  The revision does not depend on the build type, so the guard
+# checks the same value for either.
+AOI_VTK_BUILD_TYPE="${AOI_VTK_BUILD_TYPE:-Debug}"
 
 say() { printf '\n=== %s ===\n' "$*"; }
 
@@ -363,7 +380,8 @@ stage_deps() {
 # Qt-enabled, same MSVC / Qt ABI), so conan/recipes/vtk builds it from source and
 # publishes it as vtk/9.5.0@aoi/stable.  It is by far the longest step in the
 # pipeline (~26 minutes measured on this machine), hence the skip when the cache
-# already holds a matching Debug package (AOI_FORCE_VTK=1 rebuilds it).
+# already holds a package for the requested build type (AOI_VTK_BUILD_TYPE, and
+# AOI_FORCE_VTK=1 rebuilds it regardless).
 #
 # "Matching" means matching the recipe revision conan.lock pins, not merely
 # "a Debug vtk exists".  Conan keys binaries by (recipe revision, package id),
@@ -372,7 +390,17 @@ stage_deps() {
 # skipped the rebuild the new lockfile required, and the failure then surfaced
 # much later in `deps` as "Package 'vtk/9.5.0@aoi/stable' not resolved".
 stage_vtk() {
-  say "vtk: conan create conan/recipes/vtk -> vtk/9.5.0@aoi/stable (Debug)"
+  # Reject anything Conan would not accept *before* the 26 minute compile.  The
+  # value is passed to `-s:h build_type=` and used as the cache lookup key, so a
+  # typo ("release", "RelWithdebug") reads as "not built yet" and starts a long
+  # build whose output nothing in this project will ever link.
+  case "$AOI_VTK_BUILD_TYPE" in
+    Debug|Release|RelWithDebInfo) ;;
+    *) printf 'ERROR: AOI_VTK_BUILD_TYPE must be Debug, Release or RelWithDebInfo (got "%s").\n' \
+                "$AOI_VTK_BUILD_TYPE" >&2
+       return 2 ;;
+  esac
+  say "vtk: conan create conan/recipes/vtk -> vtk/9.5.0@aoi/stable ($AOI_VTK_BUILD_TYPE)"
   require_conan
 
   # Both files Conan reads out of this repository.  Each has been CRLF in the
@@ -429,23 +457,35 @@ stage_vtk() {
   fi
   printf 'recipe revision: %s (matches conan.lock)\n' "$disk_rev"
 
-  # Only the locked revision counts as "already built".
+  # Only the locked revision counts as "already built", and only for the build
+  # type this run asked for: Debug and Release are different package ids under
+  # the same revision, so one being cached says nothing about the other.
   if [ "$AOI_FORCE_VTK" != "1" ]; then
-    if "$AOI_CONAN" list "vtk/9.5.0@aoi/stable#${locked_rev}:*" -c 2>/dev/null | grep -q 'build_type: Debug'; then
-      printf 'vtk/9.5.0@aoi/stable#%s (Debug) is already in the cache -- skipping.\n' "${locked_rev:0:12}"
+    if "$AOI_CONAN" list "vtk/9.5.0@aoi/stable#${locked_rev}:*" -c 2>/dev/null \
+         | grep -q "build_type: $AOI_VTK_BUILD_TYPE"; then
+      printf 'vtk/9.5.0@aoi/stable#%s (%s) is already in the cache -- skipping.\n' \
+             "${locked_rev:0:12}" "$AOI_VTK_BUILD_TYPE"
       printf 'AOI_FORCE_VTK=1 rebuilds it.\n'
       return 0
     fi
   fi
+  # One log per build type, so a Release attempt cannot overwrite the evidence
+  # of the Debug one (or the other way round).
+  local bt_lower create_log
+  bt_lower="$(printf '%s' "$AOI_VTK_BUILD_TYPE" | tr '[:upper:]' '[:lower:]')"
+  create_log="$LOG_DIR/vtk-create-${bt_lower}.log"
   local -a remote_flag=()
   [ "$AOI_OFFLINE" = "1" ] && remote_flag=(--no-remote)
   local rc
+  # No -s:h here when the profile already says Release, but pass it anyway: the
+  # build type has to come from this one variable whichever way the profile is
+  # edited later.
   "$AOI_CONAN" create "$ROOT/conan/recipes/vtk" --user=aoi --channel=stable \
       "${remote_flag[@]}" \
       -pr:h="$PROFILE" -pr:b="$PROFILE" \
-      -s:h build_type=Debug 2>&1 | tee "$LOG_DIR/vtk-create-debug.log"
+      -s:h build_type="$AOI_VTK_BUILD_TYPE" 2>&1 | tee "$create_log"
   rc=${PIPESTATUS[0]}
-  [ "$rc" -eq 0 ] || printf 'ERROR: conan create failed (exit %d). See %s\n' "$rc" "$LOG_DIR/vtk-create-debug.log" >&2
+  [ "$rc" -eq 0 ] || printf 'ERROR: conan create failed (exit %d). See %s\n' "$rc" "$create_log" >&2
   return "$rc"
 }
 
@@ -532,16 +572,17 @@ fi
 rc=0
 for stage in "$@"; do
   case "$stage" in
-    vtk)       stage_vtk       || { rc=$?; break; } ;;
-    deps)      stage_deps      || { rc=$?; break; } ;;
-    configure) stage_configure || { rc=$?; break; } ;;
-    build)     stage_build     || { rc=$?; break; } ;;
-    test)      stage_test      || { rc=$?; break; } ;;
-    run)       stage_run       || { rc=$?; break; } ;;
-    package)   stage_package   || { rc=$?; break; } ;;
-    all)       for s in vtk deps configure build test run package; do
-                 "stage_$s" || { rc=$?; break 2; }
-               done ;;
+    vtk)         stage_vtk       || { rc=$?; break; } ;;
+    vtk-release) AOI_VTK_BUILD_TYPE=Release stage_vtk || { rc=$?; break; } ;;
+    deps)        stage_deps      || { rc=$?; break; } ;;
+    configure)   stage_configure || { rc=$?; break; } ;;
+    build)       stage_build     || { rc=$?; break; } ;;
+    test)        stage_test      || { rc=$?; break; } ;;
+    run)         stage_run       || { rc=$?; break; } ;;
+    package)     stage_package   || { rc=$?; break; } ;;
+    all)         for s in vtk deps configure build test run package; do
+                   "stage_$s" || { rc=$?; break 2; }
+                 done ;;
     *) printf 'ERROR: unknown stage "%s"\n' "$stage" >&2; exit 2 ;;
   esac
 done
