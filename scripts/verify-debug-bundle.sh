@@ -116,18 +116,36 @@ require_toolchain() {
 
 # --- stages ----------------------------------------------------------------
 
+# Remove a directory left behind by an earlier run, and prove it is gone.
+#
+# Both trees this script clears are large (a restored Debug home is ~570k files)
+# and a cache unpacked by tar can carry read-only entries, so drop the attribute
+# and retry.  The errors stay visible on purpose: swallowing them costs a
+# diagnostic round, and "could not clear" alone does not say whether it was a
+# permission, a lock or a path-length problem.
+clear_tree() {
+  local dir="$1" out
+  [ -e "$dir" ] || return 0
+  out=$(rm -rf "$dir" 2>&1 | head -3)
+  if [ -e "$dir" ]; then
+    printf '      rm failed%s; clearing read-only bits and retrying\n' \
+           "${out:+ ($(printf '%s' "$out" | tr '\n' ' '))}"
+    chmod -R u+w "$dir" 2>/dev/null || true
+    rm -rf "$dir" 2>&1 | head -3
+  fi
+  if [ -e "$dir" ]; then
+    printf '      still present; moving aside instead\n'
+    mv "$dir" "$dir.stale_$(date +%H%M%S)" 2>&1 | head -3
+  fi
+  [ -e "$dir" ] && { bad "could not clear $dir (errors above)"; return 1; }
+  return 0
+}
+
 stage_home() {
   say "home: create an empty CONAN_HOME"
-  if [ -e "$V_HOME_UNIX" ]; then
-    # A stale home would let packages leak in from an earlier run and the
-    # verification would then pass for the wrong reason.  rm is a coreutils
-    # binary, so the host's Python safe-delete shim does not intercept it; if
-    # that still fails the tree is moved aside and reported.
-    if ! rm -rf "$V_HOME_UNIX" 2>/dev/null || [ -e "$V_HOME_UNIX" ]; then
-      mv "$V_HOME_UNIX" "$V_HOME_UNIX.stale_$(date +%H%M%S)" 2>/dev/null || true
-    fi
-    [ -e "$V_HOME_UNIX" ] && { bad "could not clear $V_HOME_UNIX"; return 1; }
-  fi
+  # A stale home would let packages leak in from an earlier run and the
+  # verification would then pass for the wrong reason.
+  clear_tree "$V_HOME_UNIX" || return 1
   mkdir -p "$V_HOME_UNIX" || return 1
   [ "$(ls -A "$V_HOME_UNIX" | wc -l)" -eq 0 ] || { bad "not empty"; return 1; }
   ok "empty: $V_HOME"
@@ -245,6 +263,15 @@ stage_build() {
   say "build: cmake configure + build (fresh tree, restored toolchain)"
   require_toolchain
   prefer_bundled_ninja
+
+  # Empty bin/ even when the build tree itself is reused.  Every executable and
+  # its whole DLL closure land there, so a closure left over from an earlier run
+  # would let the `test` and `run` stages succeed with DLLs the bundle never
+  # provided -- precisely the leak this script exists to catch.  Ninja notices
+  # the missing outputs and relinks them, which re-runs the deploy step against
+  # what the bundle actually contains, so this costs a relink, not a recompile.
+  clear_tree "$V_BUILD/bin" || return 1
+  mkdir -p "$V_BUILD/bin" || return 1
   # Shrimp is ON by default in the top-level CMakeLists, but say so explicitly:
   # this stage is a check on the *bundle*, and "the default happened to be on"
   # would let a bundle without VTK pass quietly if that default ever changed.

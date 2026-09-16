@@ -625,14 +625,18 @@ Seven stages, each one a way a hand-off has failed before:
 | `restore` | the archive unpacks and yields the same binaries the pkglist claims |
 | `check` | `conan cache check-integrity` recomputes every manifest and agrees |
 | `install` | `conan install --no-remote`, **without** `--build=missing` |
-| `build` | cmake configures and builds a fresh tree with the restored toolchain |
+| `build` | cmake configures and builds a fresh tree with the restored toolchain, `bin/` emptied first so no DLL from an earlier run can stand in for one the bundle does not have |
 | `test` | ctest reports 100% |
 | `run` | `Shrimp.exe --selftest` prints `END-TO-END PASS` out of that tree |
 
 Stages can be run on their own — `bash scripts/verify-debug-bundle.sh build test`
 — which is what you want while iterating; the full chain is what a hand-off
-needs. The developer cache in `%USERPROFILE%\.conan2` is never touched, logs land
-in `out/6-verify.log` and `out/verify/*.log`, and `out/` is git-ignored.
+needs. Every stage clears what a previous run left behind (the throwaway home,
+and `bin/`, where the executables and their whole DLL closure land), so a second
+run cannot pass on its own leftovers and the script can simply be re-run after
+the archive changes. The developer cache in `%USERPROFILE%\.conan2` is never
+touched, logs land in `out/6-verify.log` and `out/verify/*.log`, and `out/` is
+git-ignored.
 
 Measured on the 2.7 GB Debug bundle (the `with_shrimp` graph):
 
