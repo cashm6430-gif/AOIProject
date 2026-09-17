@@ -34,9 +34,11 @@ loop (TaskControl + Runtime + tests), which then needs Qt but not VTK.
 | `scripts/verify-bundle.sh` | restore a bundle into an empty cache and build, test **and run** the project from it (same `AOI_CACHE_CONFIG` switch) |
 | `scripts/upload-cache.sh` | push a bundle's packages to a Conan remote, from the tracked manifest (`conan/lists/`), with preflight checks and a read-back |
 | `scripts/pkglist-refs.py` | turn a pkglist into one `ref#revision:package_id` line per binary, or into a private-packages-only subset |
+| `scripts/restore_plaintext_from_git.py` | restore tracked UTF-8 text files if endpoint encryption has replaced them with ciphertext |
 | `scripts/package-debug-cache.sh`, `scripts/verify-debug-bundle.sh` | the original Debug-only entry points; now one-line wrappers that set `AOI_CACHE_CONFIG=debug` |
 | `scripts/normalize-cache-reparse.py` | repair unreadable NTFS reparse points before `conan cache save` |
 
+The concise script map lives in [`scripts/README.md`](../scripts/README.md).
 Everything below explains *why* those scripts are shaped the way they are.
 `_env.sh` sets the SDK variables by hand instead of calling `vcvarsall.bat`,
 because `reg.exe` is unavailable here and the generated `conanvcvars.bat`
@@ -952,7 +954,6 @@ the archive, the consumer does not spend ~26 minutes rebuilding it either.
 `run` is the stage that separates "the bundle compiles" from "the bundle is
 usable": linking succeeds happily while the VTK or Qt runtime DLLs, or the
 OpenGL context, are still wrong.
-
 
 
 
