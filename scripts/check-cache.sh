@@ -184,11 +184,15 @@ for ref, entry in doc.items():
         binaries += len(pkgs)
         if ref.startswith("vtk/"):
             vtk.append((rrev, len(pkgs)))
-        if ref.startswith("qt/"):
-            for pbody in pkgs.values():
-                settings = ((pbody or {}).get("info") or {}).get("settings") or {}
-                if settings.get("build_type"):
-                    kinds.add(settings["build_type"])
+        # Read the build type from every package, not just qt.  qt used to be the
+        # reliable witness because it is in every full bundle -- but a private
+        # bundle carries vtk and nothing else, and asking only qt made that one
+        # report "no qt package to read a build type from" while holding both
+        # build types of the one package that matters.
+        for pbody in pkgs.values():
+            settings = ((pbody or {}).get("info") or {}).get("settings") or {}
+            if settings.get("build_type"):
+                kinds.add(settings["build_type"])
 
 lock = None
 if os.path.exists(lock_path):
@@ -198,7 +202,7 @@ if os.path.exists(lock_path):
 
 info("recipes    : {}".format(recipes))
 info("binaries   : {}".format(binaries))
-info("carries    : {}".format(", ".join(sorted(kinds)) or "no qt package to read a build type from"))
+info("carries    : {}".format(", ".join(sorted(kinds)) or "no package to read a build type from"))
 info("conan.lock : {}".format("#" + lock[:12] if lock else "(pins no vtk/9.5.0@aoi/stable)"))
 for rrev, count in vtk:
     note = "" if rrev == lock else "   <- NOT what conan.lock pins"
@@ -227,6 +231,14 @@ ok("this archive is the bundle conan.lock describes")
 if kinds == {"Release"}:
     print("      note   Release binaries only -- building Debug needs\n"
           "             out/conan-cache-debug.tgz as well, and the other way round.")
+# A private-only bundle is not a smaller full bundle, it is a different thing:
+# the packages no remote can serve, for the machine that will upload them.  Said
+# out loud because its small size would otherwise read as a truncated transfer.
+if recipes and all("@" in ref for ref in doc):
+    print("      note   private packages only ({} recipe, {} binaries).  That is what\n"
+          "             `scripts/upload-cache.sh -r <remote> --only-private` needs, but\n"
+          "             it is NOT enough to build here: the third-party packages come\n"
+          "             from the full bundles or from the remote.".format(recipes, binaries))
 sys.exit(rc)
 PYEOF
   exit $?

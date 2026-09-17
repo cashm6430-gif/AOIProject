@@ -31,10 +31,11 @@ loop (TaskControl + Runtime + tests), which then needs Qt but not VTK.
 | `scripts/_env.sh` | shared environment: VS2022 + Windows SDK variables, duplicate-case proxy de-dup, Conan/Ninja lookup. Sourced, not executed |
 | `scripts/prefetch-sources.sh` | pre-download dependency sources into the Conan sources cache, so a build needs no network |
 | `scripts/package-cache.sh` | build an offline cache bundle: `out/conan-cache-debug.tgz`, or `out/conan-cache-release.tgz` with `AOI_CACHE_CONFIG=release` |
+| `scripts/package-private.sh` | build `out/conan-cache-private.tgz` — the private packages alone, both build types, for the machine that only has to upload |
 | `scripts/verify-bundle.sh` | restore a bundle into an empty cache and build, test **and run** the project from it (same `AOI_CACHE_CONFIG` switch) |
 | `scripts/check-cache.sh` | compare the local cache against the tracked manifests — "did `conan cache restore` really deliver the archive?" — or, with `--archive <file>`, read a bundle's own `pkglist.json`; read-only, offline |
 | `scripts/upload-cache.sh` | push a bundle's packages to a Conan remote, from the tracked manifest (`conan/lists/`), with preflight checks and a read-back |
-| `scripts/pkglist-refs.py` | turn a pkglist into one `ref#revision:package_id` line per binary, into a private-packages-only subset, into the rows a cache is missing, or into the revisions a reference has |
+| `scripts/pkglist-refs.py` | turn a pkglist into one `ref#revision:package_id` line per binary, into a private-packages-only subset, into the rows a cache is missing, into the revisions a reference has, or into the union of several pkg lists |
 | `scripts/package-debug-cache.sh`, `scripts/verify-debug-bundle.sh` | the original Debug-only entry points; now one-line wrappers that set `AOI_CACHE_CONFIG=debug` |
 | `scripts/normalize-cache-reparse.py` | repair unreadable NTFS reparse points before `conan cache save` |
 
@@ -609,7 +610,7 @@ configuration step. Do not reintroduce legacy `.pro`, `.pri`, `.props` or
 
 When the package remote is unreachable (offline machine, blocked JFrog CE),
 move binaries as a cache bundle instead of uploading them directly. One bundle
-per configuration; four scripts cover the whole round trip.
+per configuration; five scripts cover the whole round trip.
 
 ```powershell
 # 1. Pack.  Resolves the graph, checks it carries binaries, writes the tracked
@@ -635,6 +636,52 @@ bash scripts/upload-cache.sh -r <remote-name>    # both configs
 bash scripts/upload-cache.sh -r <remote-name> --only-private
 bash scripts/upload-cache.sh -r <remote-name> --verify-only
 ```
+
+### Carrying only what the remote needs
+
+The two snapshots above exist so that a machine with **no** remote at all can
+build. The machine that has to *upload* needs the opposite: the packages no
+remote can serve, and nothing else. Those are the private ones — the references
+carrying a user/channel, here only `vtk/9.5.0@aoi/stable`. A JFrog repository
+that proxies ConanCenter already supplies the other 46.
+
+```bash
+bash scripts/package-private.sh          # -> out/conan-cache-private.tgz
+```
+
+| archive | bytes | recipes | binaries |
+|---|---|---|---|
+| `out/conan-cache-debug.tgz` | 2,852,120,829 | 47 | 53 |
+| `out/conan-cache-release.tgz` | 2,613,791,722 | 47 | 47 |
+| `out/conan-cache-private.tgz` | 194,118,403 | 1 | 2 |
+
+One archive for both build types, on purpose: Debug and Release are two package
+ids under the same recipe revision, so a single `conan cache save -l` carries
+both. `scripts/pkglist-refs.py merge --private-only` unions the two tracked
+manifests into exactly that list — which is what makes it correct rather than
+merely convenient, since a plain concatenation would let the Release entry's
+package id replace the Debug one.
+
+The private bundle is an order of magnitude smaller than a full one because a
+full one is mostly **sources**, not binaries: qt's `source` folder alone is
+4.2 GB uncompressed and msys2's is 768 MB, against 236 MB for the whole of vtk
+including its sources. The build trees — 8.6 GB of `.obj` and 3.4 GB of `.ilk`
+for vtk Debug — are not in the bundles at all; `conan cache save` packages the
+recipe's export/export_source/source folders and each package's `p/` folder
+(`conan/api/subapi/cache.py`, "Package only selected folders").
+
+```bash
+# on the machine that can reach the remote
+conan cache restore out/conan-cache-private.tgz
+bash scripts/upload-cache.sh -r <remote-name> --only-private
+```
+
+It is not a substitute for the full bundles: it cannot build anything, because
+it carries no qt and no other third-party package. `check-cache.sh --archive`
+says so when it inspects one. The script prints the size and the md5 of what it
+wrote — take those with the file, since a bundle made later will differ by a few
+bytes and only the checksum taken at the source tells a complete transfer from a
+stopped one.
 
 ### Check the restore before blaming the archive
 
@@ -678,11 +725,17 @@ bash scripts/check-cache.sh --archive out/conan-cache-debug.tgz
           [ok]   streamed to the end -- complete, not truncated
           recipes    : 47
           binaries   : 53
-          carries    : Debug
+          carries    : Debug, Release
           conan.lock : #983c7acfa0ca
           vtk        : #983c7acfa0ca (1 binaries)
 
           [ok]   this archive is the bundle conan.lock describes
+
+`carries` names both build types for the Debug bundle because it also holds the
+six packages resolved in the **build** context (profile `build_type=Release`
+against a Debug host); the Release bundle reports `Release` alone. The line is
+read from every package's `info.settings`, not from qt — a private bundle has no
+qt, and asking only qt made it claim it could not tell.
 
 Three answers come out of one pass:
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Read the package lists that `conan list --graph` writes.
 
-Four shapes of the same JSON are needed by the scripts around it.  A pkglist and
+Five shapes of the same JSON are needed by the scripts around it.  A pkglist and
 the output of `conan list "*#*:*" --format=json` have the same structure --
 {"Local Cache": {ref: {"revisions": {rrev: {"packages": {pkgid: ...}}}}} -- so
-one can be subtracted from the other:
+one can be subtracted from the other, or two can be added together:
 
   rows    one line per binary, "ref#recipe_revision:package_id", so a shell loop
           can ask a remote whether each one arrived.  `conan list` has no
@@ -28,14 +28,25 @@ one can be subtracted from the other:
           between "the locked revision is not here" and "only a stale revision
           of this recipe is here", which need different fixes.
 
+  merge   one pkglist carrying the union of several.  The manifests here are one
+          per build type, because a cache snapshot is one per build type; but a
+          reference's Debug and Release binaries are two package ids under the
+          same recipe revision, so `conan cache save -l` can carry both in a
+          single archive.  That is what makes a private-only bundle possible:
+          `merge --private-only` over pkglist-debug.json and pkglist-release.json
+          yields exactly the packages scripts/upload-cache.sh -r <remote>
+          --only-private would push, and nothing else.
+
 Usage:
     pkglist-refs.py rows    <pkglist.json> [--private-only]
     pkglist-refs.py subset  <pkglist.json> <out.json> [--private-only]
     pkglist-refs.py missing <pkglist.json> <cache.json>
     pkglist-refs.py revs    <cache.json> <ref>
+    pkglist-refs.py merge   <out.json> <pkglist.json>... [--private-only]
 """
 
 import json
+import os
 import sys
 
 
@@ -106,6 +117,28 @@ def subset(doc, private_only):
     return out
 
 
+def merge(docs, private_only):
+    # Union, not overwrite.  The same ref appears in both input manifests (vtk is
+    # in the Debug and the Release graph alike) and the two entries disagree by
+    # design -- each carries its own build type's package id.  Taking the later
+    # document's word for the whole entry would silently drop the Debug binary,
+    # so revisions are unioned and packages are unioned inside each revision.
+    out = {}
+    for doc in docs:
+        for cache_name, cache in doc.items():
+            dst = out.setdefault(cache_name, {})
+            for ref, info in cache.items():
+                if private_only and not is_private(ref):
+                    continue
+                entry = dst.setdefault(ref, {"revisions": {}})
+                revs = entry["revisions"]
+                for rrev, rdata in (info.get("revisions") or {}).items():
+                    rev = revs.setdefault(rrev, dict(rdata))
+                    rev.setdefault("packages", {})
+                    rev["packages"].update(rdata.get("packages") or {})
+    return out
+
+
 def main(argv):
     if len(argv) < 3:
         print(__doc__.strip(), file=sys.stderr)
@@ -115,6 +148,35 @@ def main(argv):
     rest = argv[3:]
     private_only = "--private-only" in rest
     dests = [a for a in rest if not a.startswith("--")]
+
+    # `merge` is the one mode whose first positional is an OUTPUT, not an input,
+    # so it must be dispatched before the shared load below -- otherwise it tries
+    # to read the file it is about to write.
+    #
+    # Getting that ordering wrong is not hypothetical: the first version of this
+    #   branch kept the generic "argv[2] is the input, the rest are outputs"
+    # reading, so `merge out/x.json in1.json in2.json` took out/x.json as an
+    # input, found no inputs left, and wrote the merged document over in1.json --
+    # which in the intended use is conan/lists/pkglist-debug.json, a tracked
+    # manifest.  Hence the explicit out_path below and the guard under it.
+    if mode == "merge":
+        out_path = src
+        sources = [a for a in rest if not a.startswith("--")]
+        if not sources:
+            print("ERROR: merge needs <out.json> and at least one input pkglist",
+                  file=sys.stderr)
+            return 2
+        same = [p for p in sources
+                if os.path.abspath(p).lower() == os.path.abspath(out_path).lower()]
+        if same:
+            print(f"ERROR: refusing to overwrite an input: {same[0]}", file=sys.stderr)
+            return 2
+        merged = merge([load(p) for p in sources], private_only)
+        with open(out_path, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(merged, fh, indent=4)
+        for line in rows(merged, private_only):
+            print(line)
+        return 0
 
     doc = load(src)
 
