@@ -301,3 +301,8 @@ printf '\nConfiguration    : %s (%s)\n' "$CONFIG" "$BUILD_TYPE"
 printf 'Packages in list : %s\n' "$(grep -cE '^ {8}"' "$PKG_JSON" || true)"
 printf 'Binaries in list : %s\n' "$(grep -cE '^ {24}"[0-9a-f]{40}": \{$' "$PKG_JSON" || true)"
 printf 'Archive size     : %s\n' "$(du -h "$ARCHIVE" | cut -f1)"
+# Printed, not merely computable: this archive is 2+ GB and travels by hand, and
+# a checksum taken on the producing machine is the only way to tell a complete
+# transfer from a stopped one without restoring the whole thing first.
+# scripts/check-cache.sh --archive is the other half of that answer.
+printf 'md5              : %s\n' "$(md5sum "$ARCHIVE" | cut -d' ' -f1)"

@@ -31,14 +31,16 @@ loop (TaskControl + Runtime + tests), which then needs Qt but not VTK.
 | `scripts/_env.sh` | shared environment: VS2022 + Windows SDK variables, duplicate-case proxy de-dup, Conan/Ninja lookup. Sourced, not executed |
 | `scripts/prefetch-sources.sh` | pre-download dependency sources into the Conan sources cache, so a build needs no network |
 | `scripts/package-cache.sh` | build an offline cache bundle: `out/conan-cache-debug.tgz`, or `out/conan-cache-release.tgz` with `AOI_CACHE_CONFIG=release` |
+| `scripts/package-private.sh` | build `out/conan-cache-private.tgz` — the private packages alone, both build types, for the machine that only has to upload |
 | `scripts/verify-bundle.sh` | restore a bundle into an empty cache and build, test **and run** the project from it (same `AOI_CACHE_CONFIG` switch) |
+| `scripts/check-cache.sh` | compare the local cache against the tracked manifests — "did `conan cache restore` really deliver the archive?" — or, with `--archive <file>`, read a bundle's own `pkglist.json`; read-only, offline |
 | `scripts/upload-cache.sh` | push a bundle's packages to a Conan remote, from the tracked manifest (`conan/lists/`), with preflight checks and a read-back |
-| `scripts/pkglist-refs.py` | turn a pkglist into one `ref#revision:package_id` line per binary, or into a private-packages-only subset |
-| `scripts/restore_plaintext_from_git.py` | restore tracked UTF-8 text files if endpoint encryption has replaced them with ciphertext |
+| `scripts/pkglist-refs.py` | turn a pkglist into one `ref#revision:package_id` line per binary, into a private-packages-only subset, into the rows a cache is missing, into the revisions a reference has, or into the union of several pkg lists |
+| scripts/restore_plaintext_from_git.py | restore tracked UTF-8 text files if endpoint encryption has replaced them with ciphertext |
 | `scripts/package-debug-cache.sh`, `scripts/verify-debug-bundle.sh` | the original Debug-only entry points; now one-line wrappers that set `AOI_CACHE_CONFIG=debug` |
 | `scripts/normalize-cache-reparse.py` | repair unreadable NTFS reparse points before `conan cache save` |
 
-The concise script map lives in [`scripts/README.md`](../scripts/README.md).
+The concise script map lives in [scripts/README.md](../scripts/README.md).
 Everything below explains *why* those scripts are shaped the way they are.
 `_env.sh` sets the SDK variables by hand instead of calling `vcvarsall.bat`,
 because `reg.exe` is unavailable here and the generated `conanvcvars.bat`
@@ -610,7 +612,7 @@ configuration step. Do not reintroduce legacy `.pro`, `.pri`, `.props` or
 
 When the package remote is unreachable (offline machine, blocked JFrog CE),
 move binaries as a cache bundle instead of uploading them directly. One bundle
-per configuration; three scripts cover the whole round trip.
+per configuration; five scripts cover the whole round trip.
 
 ```powershell
 # 1. Pack.  Resolves the graph, checks it carries binaries, writes the tracked
@@ -627,6 +629,7 @@ AOI_CACHE_CONFIG=release bash scripts/verify-bundle.sh           # Release
 # 3. On the machine that can reach the remote:
 conan cache restore out/conan-cache-debug.tgz
 conan cache restore out/conan-cache-release.tgz
+bash scripts/check-cache.sh                      # did both restores land?
 conan remote add <remote-name> https://<host>/artifactory/api/conan/<repo>
 conan remote login <remote-name> <user>          # token, if the repo wants one
 bash scripts/upload-cache.sh -r <remote-name>    # both configs
@@ -635,6 +638,142 @@ bash scripts/upload-cache.sh -r <remote-name>    # both configs
 bash scripts/upload-cache.sh -r <remote-name> --only-private
 bash scripts/upload-cache.sh -r <remote-name> --verify-only
 ```
+
+### Carrying only what the remote needs
+
+The two snapshots above exist so that a machine with **no** remote at all can
+build. The machine that has to *upload* needs the opposite: the packages no
+remote can serve, and nothing else. Those are the private ones — the references
+carrying a user/channel, here only `vtk/9.5.0@aoi/stable`. A JFrog repository
+that proxies ConanCenter already supplies the other 46.
+
+```bash
+bash scripts/package-private.sh          # -> out/conan-cache-private.tgz
+```
+
+| archive | bytes | recipes | binaries |
+|---|---|---|---|
+| `out/conan-cache-debug.tgz` | 2,852,120,829 | 47 | 53 |
+| `out/conan-cache-release.tgz` | 2,613,791,722 | 47 | 47 |
+| `out/conan-cache-private.tgz` | 194,118,403 | 1 | 2 |
+
+One archive for both build types, on purpose: Debug and Release are two package
+ids under the same recipe revision, so a single `conan cache save -l` carries
+both. `scripts/pkglist-refs.py merge --private-only` unions the two tracked
+manifests into exactly that list — which is what makes it correct rather than
+merely convenient, since a plain concatenation would let the Release entry's
+package id replace the Debug one.
+
+The private bundle is an order of magnitude smaller than a full one because a
+full one is mostly **sources**, not binaries: qt's `source` folder alone is
+4.2 GB uncompressed and msys2's is 768 MB, against 236 MB for the whole of vtk
+including its sources. The build trees — 8.6 GB of `.obj` and 3.4 GB of `.ilk`
+for vtk Debug — are not in the bundles at all; `conan cache save` packages the
+recipe's export/export_source/source folders and each package's `p/` folder
+(`conan/api/subapi/cache.py`, "Package only selected folders").
+
+```bash
+# on the machine that can reach the remote
+conan cache restore out/conan-cache-private.tgz
+bash scripts/upload-cache.sh -r <remote-name> --only-private
+```
+
+It is not a substitute for the full bundles: it cannot build anything, because
+it carries no qt and no other third-party package. `check-cache.sh --archive`
+says so when it inspects one. The script prints the size and the md5 of what it
+wrote — take those with the file, since a bundle made later will differ by a few
+bytes and only the checksum taken at the source tells a complete transfer from a
+stopped one.
+
+### Check the restore before blaming the archive
+
+`conan cache restore` only ever *adds* to a cache and says nothing about what
+was already there, so three different mistakes are indistinguishable from the
+outside: restoring one archive out of two, restoring into a cache that still
+holds an unrelated state, and a transfer that arrived truncated. All three leave
+a graph that resolves only partially, and the failure surfaces one step later,
+inside `conan create`, on whichever dependency is reached first. Here that
+dependency is qt (`vtk/9.5.0@aoi/stable` requires it), so a Debug build over a
+cache that holds only the Release qt stops with a message about **qt** — while
+the file that never arrived is a different archive entirely.
+
+`scripts/check-cache.sh` asks the question underneath instead: is every binary
+the manifest names in this cache?
+
+```bash
+bash scripts/check-cache.sh                  # both configurations
+bash scripts/check-cache.sh --config=debug
+```
+
+It runs `conan list "*#*:*" --format=json` once (0.8 s, 47 recipes) and
+subtracts both tracked manifests from that answer; it contacts no remote and
+writes nothing but its own scratch files under `out/check-cache/`. The exit
+status is 0 only when every requested configuration is complete.
+
+### Check the archive before restoring it
+
+That question is about the machine. The one that comes first is about the file:
+is the bundle being carried the one this checkout expects? A file name and a
+timestamp do not answer it. `conan cache save` writes the work list it was
+handed into the bundle as `pkglist.json`, so the bundle describes itself:
+
+```bash
+bash scripts/check-cache.sh --archive out/conan-cache-debug.tgz
+```
+
+    === archive: out/conan-cache-debug.tgz ===
+          size       : 2,852,120,829 bytes
+          members    : 629,126
+          [ok]   streamed to the end -- complete, not truncated
+          recipes    : 47
+          binaries   : 53
+          carries    : Debug, Release
+          conan.lock : #983c7acfa0ca
+          vtk        : #983c7acfa0ca (1 binaries)
+
+          [ok]   this archive is the bundle conan.lock describes
+
+`carries` names both build types for the Debug bundle because it also holds the
+six packages resolved in the **build** context (profile `build_type=Release`
+against a Debug host); the Release bundle reports `Release` alone. The line is
+read from every package's `info.settings`, not from qt — a private bundle has no
+qt, and asking only qt made it claim it could not tell.
+
+Three answers come out of one pass:
+
+* **Which revision of the private package it carries**, next to the one
+  `conan.lock` pins. A bundle packed before the recipe was pinned to the locked
+  revision cannot be made usable by restoring it: the install reports a missing
+  Debug dependency and then starts a full VTK rebuild.
+* **Which configuration it holds** — read from the qt package's `build_type`.
+  Debug and Release are different package ids under the same recipe revisions, so
+  a Release bundle carries nothing of Debug, and restoring it alone leaves a
+  Debug build with no qt.
+* **Whether it arrived whole.** The stream is read to its end, so a transfer cut
+  short is caught here. This failure hides best of all: `pkglist.json` sits near
+  the front, so a truncated file can still read as the correct bundle while
+  `conan cache restore` extracts only the part that arrived and exits 0.
+
+Two details it depends on:
+
+* **`"*#*:*"`, not `"*:*"`.** A pattern that names no revision resolves to the
+  *latest* one, so `"*:*"` omits every revision a recipe has ever had and would
+  report a manifest entry pinned to an older revision as absent while that
+  binary sits in the cache. `conan list` also takes a single pattern only —
+  passing two is answered with `unrecognized arguments` — so a per-entry loop
+  would be 47 process starts per configuration for the same answer.
+* **Comparing it against both manifests, not just the requested one.** Debug and
+  Release are different package ids under the same recipe revisions, so a
+  complete Release cache contains nothing of Debug. That makes the useful
+  diagnosis available: when the requested configuration is incomplete and the
+  other is perfect, the cause is "the wrong archive was restored", and the
+  script says so and prints the one `conan cache restore` that fixes it.
+  Restoring into a half-filled cache is safe — nothing has to be cleaned first.
+
+It also prints which revisions of `vtk/9.5.0@aoi/stable` the cache holds next to
+the one `conan.lock` pins. A cache carrying only a *stale* revision of a rebuilt
+recipe looks empty to the resolver but not to `conan list`, and that needs a
+build rather than a restore.
 
 ### The manifests are tracked in git
 
@@ -954,6 +1093,3 @@ the archive, the consumer does not spend ~26 minutes rebuilding it either.
 `run` is the stage that separates "the bundle compiles" from "the bundle is
 usable": linking succeeds happily while the VTK or Qt runtime DLLs, or the
 OpenGL context, are still wrong.
-
-
-
