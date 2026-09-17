@@ -32,7 +32,7 @@ loop (TaskControl + Runtime + tests), which then needs Qt but not VTK.
 | `scripts/prefetch-sources.sh` | pre-download dependency sources into the Conan sources cache, so a build needs no network |
 | `scripts/package-cache.sh` | build an offline cache bundle: `out/conan-cache-debug.tgz`, or `out/conan-cache-release.tgz` with `AOI_CACHE_CONFIG=release` |
 | `scripts/verify-bundle.sh` | restore a bundle into an empty cache and build, test **and run** the project from it (same `AOI_CACHE_CONFIG` switch) |
-| `scripts/check-cache.sh` | compare the local cache against the tracked manifests — "did `conan cache restore` really deliver the archive?", read-only, offline, ~1 s |
+| `scripts/check-cache.sh` | compare the local cache against the tracked manifests — "did `conan cache restore` really deliver the archive?" — or, with `--archive <file>`, read a bundle's own `pkglist.json`; read-only, offline |
 | `scripts/upload-cache.sh` | push a bundle's packages to a Conan remote, from the tracked manifest (`conan/lists/`), with preflight checks and a read-back |
 | `scripts/pkglist-refs.py` | turn a pkglist into one `ref#revision:package_id` line per binary, into a private-packages-only subset, into the rows a cache is missing, or into the revisions a reference has |
 | `scripts/package-debug-cache.sh`, `scripts/verify-debug-bundle.sh` | the original Debug-only entry points; now one-line wrappers that set `AOI_CACHE_CONFIG=debug` |
@@ -660,6 +660,44 @@ It runs `conan list "*#*:*" --format=json` once (0.8 s, 47 recipes) and
 subtracts both tracked manifests from that answer; it contacts no remote and
 writes nothing but its own scratch files under `out/check-cache/`. The exit
 status is 0 only when every requested configuration is complete.
+
+### Check the archive before restoring it
+
+That question is about the machine. The one that comes first is about the file:
+is the bundle being carried the one this checkout expects? A file name and a
+timestamp do not answer it. `conan cache save` writes the work list it was
+handed into the bundle as `pkglist.json`, so the bundle describes itself:
+
+```bash
+bash scripts/check-cache.sh --archive out/conan-cache-debug.tgz
+```
+
+    === archive: out/conan-cache-debug.tgz ===
+          size       : 2,852,120,829 bytes
+          members    : 629,126
+          [ok]   streamed to the end -- complete, not truncated
+          recipes    : 47
+          binaries   : 53
+          carries    : Debug
+          conan.lock : #983c7acfa0ca
+          vtk        : #983c7acfa0ca (1 binaries)
+
+          [ok]   this archive is the bundle conan.lock describes
+
+Three answers come out of one pass:
+
+* **Which revision of the private package it carries**, next to the one
+  `conan.lock` pins. A bundle packed before the recipe was pinned to the locked
+  revision cannot be made usable by restoring it: the install reports a missing
+  Debug dependency and then starts a full VTK rebuild.
+* **Which configuration it holds** — read from the qt package's `build_type`.
+  Debug and Release are different package ids under the same recipe revisions, so
+  a Release bundle carries nothing of Debug, and restoring it alone leaves a
+  Debug build with no qt.
+* **Whether it arrived whole.** The stream is read to its end, so a transfer cut
+  short is caught here. This failure hides best of all: `pkglist.json` sits near
+  the front, so a truncated file can still read as the correct bundle while
+  `conan cache restore` extracts only the part that arrived and exits 0.
 
 Two details it depends on:
 

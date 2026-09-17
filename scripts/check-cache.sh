@@ -5,11 +5,20 @@
 #   bash scripts/check-cache.sh                     # both configurations
 #   bash scripts/check-cache.sh --config=debug
 #   bash scripts/check-cache.sh --config=release
+#   bash scripts/check-cache.sh --archive out/conan-cache-debug.tgz
 #
 # Read-only and offline.  It asks `conan list "*#*:*"` what the local cache
 # holds and subtracts that from the manifests scripts/package-cache.sh publishes
 # (conan/lists/pkglist-<config>.json).  Nothing is restored, built or uploaded,
 # no remote is contacted, and the whole thing runs in about a second.
+#
+# --archive answers the other half of the same question, about the file instead
+# of the machine: `conan cache save` writes the work list it was handed into the
+# bundle as pkglist.json, so a bundle describes itself.  Reading that back says
+# which recipe revisions and which binaries the file carries, and whether it
+# arrived whole.  A byte count and a date that came along with the copy are not
+# evidence of either -- and the file is read to its end, so a transfer cut short
+# is caught here rather than six minutes later inside `conan create`.
 #
 # Why it exists
 # -------------
@@ -48,18 +57,23 @@ WORK_DIR="$ROOT_UNIX/out/check-cache"
 REF_LIST="$SCRIPT_DIR/pkglist-refs.py"
 
 CONFIG="both"
+ARCHIVE=""
 
 usage() {
   cat <<'EOF'
-Check the local Conan cache against the manifests in conan/lists/.
+Check the local Conan cache against the manifests in conan/lists/, or read the
+manifest an archive carries inside itself.
 
   bash scripts/check-cache.sh [--config debug|release|both]
+  bash scripts/check-cache.sh --archive out/conan-cache-debug.tgz
 
-      --config <c>   which configuration to report on      (default: both)
-  -h, --help         this text
+      --config <c>    which configuration to report on     (default: both)
+      --archive <f>   read a .tgz's own pkglist.json instead of the local cache
+  -h, --help          this text
 
 The cache is always compared against BOTH manifests, so a failure can say
 whether the other configuration's packages are the ones that are present.
+--archive ignores --config: the archive itself says which one it holds.
 The exit status is 0 only when every requested configuration is complete.
 EOF
 }
@@ -73,6 +87,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --config)    CONFIG="${2:-}"; shift 2 ;;
     --config=*)  CONFIG="${1#*=}"; shift ;;
+    --archive)   ARCHIVE="${2:-}"; shift 2 ;;
+    --archive=*) ARCHIVE="${1#*=}"; shift ;;
     -h|--help)   usage; exit 0 ;;
     *) printf 'ERROR: unknown argument "%s" (try --help)\n' "$1" >&2; exit 2 ;;
   esac
@@ -84,13 +100,9 @@ case "$CONFIG" in
      exit 2 ;;
 esac
 
-if [ -z "${AOI_CONAN:-}" ] || [ ! -x "${AOI_CONAN:-}" ]; then
-  printf 'ERROR: conan not found. Set AOI_CONAN=/path/to/conan(.exe).\n' >&2
-  exit 2
-fi
-
 # The interpreter behind conan.exe; a helper script on somebody else's machine
-# may only have a bare `python`, so fall back to whatever is on PATH.
+# may only have a bare `python`, so fall back to whatever is on PATH.  Archive
+# mode needs this and nothing else, so it is resolved before conan is required.
 PY="${AOI_PYTHON:-}"
 if [ -z "$PY" ] || [ ! -x "$PY" ]; then
   if command -v python >/dev/null 2>&1; then PY="$(command -v python)"
@@ -99,6 +111,130 @@ if [ -z "$PY" ] || [ ! -x "$PY" ]; then
     printf 'ERROR: no Python interpreter found for scripts/pkglist-refs.py.\n' >&2
     exit 2
   fi
+fi
+
+# ---------------------------------------------------------------------------
+# --archive: read the bundle's own manifest instead of the local cache.
+#
+# `conan cache save` writes the work list it was handed into the archive as
+# pkglist.json, so an archive describes itself -- which recipe revisions and
+# which binaries it carries.  That answers "is the file I am holding the right
+# one?" without trusting its name, its byte count or the date somebody copied
+# it, and it is the question that matters when two bundles travel separately
+# and only one of them arrives.
+#
+# The whole stream is read, so a truncated transfer is caught here too.  That
+# failure is invisible otherwise: `conan cache restore` extracts whatever is
+# intact and exits, leaving a cache that resolves part of a graph -- which then
+# surfaces inside `conan create` as a missing dependency of something unrelated.
+# ---------------------------------------------------------------------------
+if [ -n "$ARCHIVE" ]; then
+  if [ ! -f "$ARCHIVE" ]; then
+    printf 'ERROR: no such file: %s\n' "$ARCHIVE" >&2
+    printf '       Pass a path with forward slashes, relative to this directory.\n' >&2
+    exit 2
+  fi
+  say "archive: $ARCHIVE"
+  "$PY" - "$ARCHIVE" "$ROOT_UNIX/conan.lock" <<'PYEOF'
+import json, os, re, sys, tarfile
+
+path, lock_path = sys.argv[1], sys.argv[2]
+
+def info(m): print("      " + m)
+def ok(m):   print("      [ok]   " + m)
+def bad(m):  print("      [FAIL] " + m, file=sys.stderr)
+
+info("size       : {:,} bytes".format(os.path.getsize(path)))
+
+payload, members, broken, rc = None, 0, None, 0
+try:
+    with tarfile.open(path, "r|gz") as tf:
+        for member in tf:
+            members += 1
+            if payload is None and member.name.lstrip("./") == "pkglist.json":
+                payload = tf.extractfile(member).read()
+except Exception as exc:                 # bad gzip trailer, cut-off stream, ...
+    broken = exc
+
+info("members    : {:,}".format(members))
+if broken is None:
+    ok("streamed to the end -- complete, not truncated")
+else:
+    # The manifest can be perfectly correct and the transfer still unusable:
+    # pkglist.json sits near the front of the stream, so it is read long before
+    # the point where the file ends early.  Reporting the contents and stopping
+    # there would be the same false green that `conan cache restore` gives.
+    rc = 1
+    bad("the archive did not decompress cleanly: {}".format(broken))
+    print("      hint   the file is cut short.  `conan cache restore` extracts\n"
+          "             whatever arrived and exits, so the cache ends up holding\n"
+          "             part of a graph -- re-copy the file before trusting it.",
+          file=sys.stderr)
+
+if payload is None:
+    bad("no pkglist.json inside -- this is not a `conan cache save` archive")
+    sys.exit(1)
+
+doc = json.loads(payload)
+recipes, binaries, kinds, vtk = 0, 0, set(), []
+for ref, entry in doc.items():
+    recipes += 1
+    for rrev, body in (entry.get("revisions") or {}).items():
+        pkgs = body.get("packages") or {}
+        binaries += len(pkgs)
+        if ref.startswith("vtk/"):
+            vtk.append((rrev, len(pkgs)))
+        if ref.startswith("qt/"):
+            for pbody in pkgs.values():
+                settings = ((pbody or {}).get("info") or {}).get("settings") or {}
+                if settings.get("build_type"):
+                    kinds.add(settings["build_type"])
+
+lock = None
+if os.path.exists(lock_path):
+    found = re.search(r"vtk/9\.5\.0@aoi/stable#([0-9a-f]{32})",
+                      open(lock_path, encoding="utf-8").read())
+    lock = found.group(1) if found else None
+
+info("recipes    : {}".format(recipes))
+info("binaries   : {}".format(binaries))
+info("carries    : {}".format(", ".join(sorted(kinds)) or "no qt package to read a build type from"))
+info("conan.lock : {}".format("#" + lock[:12] if lock else "(pins no vtk/9.5.0@aoi/stable)"))
+for rrev, count in vtk:
+    note = "" if rrev == lock else "   <- NOT what conan.lock pins"
+    info("vtk        : #{}{}{}".format(rrev[:12], " ({} binaries)".format(count), note))
+
+print()
+if not vtk:
+    bad("this archive carries no vtk/9.5.0@aoi/stable at all")
+    sys.exit(1)
+if lock is None:
+    ok("carries vtk; there is no lockfile here to compare it against")
+    sys.exit(0)
+if all(rrev != lock for rrev, _ in vtk):
+    bad("this archive carries {}, but conan.lock pins #{}".format(
+        ", ".join("#" + r for r, _ in vtk), lock[:12]))
+    print("      hint   a bundle from before the recipe was pinned to the locked\n"
+          "             revision.  No amount of restoring makes it usable: the\n"
+          "             install reports a missing Debug dependency and then starts\n"
+          "             a full VTK rebuild.", file=sys.stderr)
+    print("      fix    take the current bundle from the machine that produced it;\n"
+          "             scripts/package-cache.sh prints its md5 when it packs.",
+          file=sys.stderr)
+    sys.exit(1)
+
+ok("this archive is the bundle conan.lock describes")
+if kinds == {"Release"}:
+    print("      note   Release binaries only -- building Debug needs\n"
+          "             out/conan-cache-debug.tgz as well, and the other way round.")
+sys.exit(rc)
+PYEOF
+  exit $?
+fi
+
+if [ -z "${AOI_CONAN:-}" ] || [ ! -x "${AOI_CONAN:-}" ]; then
+  printf 'ERROR: conan not found. Set AOI_CONAN=/path/to/conan(.exe).\n' >&2
+  exit 2
 fi
 
 mkdir -p "$WORK_DIR" || exit 1
