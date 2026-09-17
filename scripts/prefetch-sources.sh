@@ -119,6 +119,38 @@ vtk|3d311ff2608e971d40222ae01016d404fb07d746292f77edd86786912767a9c1|direct|1|50
 
 sha_of() { sha256sum "$1" 2>/dev/null | cut -d' ' -f1; }
 
+# Conan keeps a "<sha256>.json" beside every blob in the sources cache, and
+# `conan upload` walks that folder to decide which sources to push as *backup
+# sources*.  It aborts the entire upload with
+#     ERROR: Missing metadata file for backup source <path>
+# the moment it meets one blob without it
+# (conan/internal/rest/download_cache.py, get_backup_sources_files).
+#
+# A cache populated by hand -- this script, or curl -- has the blob and nothing
+# beside it, so that failure lands on whoever uploads next: hours later, on
+# another machine, and topically unrelated to fetching sources.  Measured here:
+# the xz_utils entry below was fetched on 2026-09-15 and broke every
+# `conan upload` until it was given a metadata file.
+#
+# The reference CANNOT be filled in from here: SOURCES carries the package
+# *name* but not its version/channel, and get_backup_sources_files matches the
+# "references" keys against the references being uploaded -- a guessed key would
+# simply never match and the entry would be dropped anyway.  So the map is left
+# empty on purpose: inert rather than mis-attributed.  Using the cache is
+# unaffected either way, because Conan looks sources up by sha256, not by this
+# file.  The only thing that changes is that this blob is not offered as a
+# backup source for an upload.
+write_metadata() {
+  # Two separate `local` statements on purpose: in one statement
+  # `local sha="$1" meta="$DEST/$sha.json"` the second assignment reads the
+  # *new* local `sha`, which is still unset at that point, and under this
+  # script's `set -u` that is fatal -- "sha: unbound variable" (bash 5.3).
+  local sha="$1"
+  local meta="$DEST/$sha.json"
+  [ -f "$meta" ] && return 0
+  printf '{"references": {}, "timestamp": %s}\n' "$(date +%s)" > "$meta"
+}
+
 # 按 route 生成 curl 的代理参数
 proxy_args() {
   case "$1" in
@@ -169,6 +201,10 @@ fetch_one() {
   local part="$TMP/$name.part"
 
   if [ -f "$target" ] && [ "$(sha_of "$target")" = "$sha" ]; then
+    # Idempotent, and the only thing that repairs an entry fetched before
+    # write_metadata() existed: re-running this script heals the old blobs
+    # instead of leaving them to break somebody else's `conan upload`.
+    write_metadata "$sha"
     printf '[skip] %-10s already cached\n' "$name"
     return 0
   fi
@@ -234,6 +270,7 @@ fetch_one() {
     if [ "$nchunks" -eq 1 ]; then
       if [ -f "$part" ] && [ "$(sha_of "$part")" = "$sha" ]; then
         mv "$part" "$target"
+        write_metadata "$sha"
         printf '[ok  ] %-10s %s (%s)\n' "$name" "$sha" "$(du -h "$target" | cut -f1)"
         return 0
       fi
@@ -247,6 +284,7 @@ fetch_one() {
         if [ "$(sha_of "$TMP/$name.assembled")" = "$sha" ]; then
           mv "$TMP/$name.assembled" "$target"
           rm -f "$TMP/$name.chunk."*
+          write_metadata "$sha"
           printf '[ok  ] %-10s %s (%s)\n' "$name" "$sha" "$(du -h "$target" | cut -f1)"
           return 0
         fi

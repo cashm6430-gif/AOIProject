@@ -9,13 +9,18 @@
 # binaries are built locally and shipped as a cache snapshot instead.  On a
 # machine that can reach the remote:
 #
-#   conan cache restore conan-cache-<config>.tgz
-#   conan upload --list=pkglist-<config>.json -r <remote> -c
+#   conan cache restore out/conan-cache-<config>.tgz
+#   bash scripts/upload-cache.sh -r <remote>
 #
 # Artefacts written into out/:
 #   conan/<config>/graph-<config>.json   dependency graph of that configuration
 #   conan/<config>/pkglist-<config>.json exact recipe+package revisions to ship
 #   conan-cache-<config>.tgz             the cache snapshot (the file to carry)
+#
+# Artefact written outside out/, because it has to travel with the source tree:
+#   conan/lists/pkglist-<config>.json    tracked copy of the list above; it is
+#                                        the work list scripts/upload-cache.sh
+#                                        hands to `conan upload`
 #
 # One snapshot per configuration, on purpose.  A bundle holds the binaries of
 # the build type it was resolved with; Debug and Release are different package
@@ -52,6 +57,14 @@ GRAPH_JSON="$CONAN_OUT/graph-$CONFIG.json"
 PKG_JSON="$CONAN_OUT/pkglist-$CONFIG.json"
 ARCHIVE="$OUT/conan-cache-$CONFIG.tgz"
 
+# The copy of the pkglist that travels with the source tree.  `conan upload`
+# takes its work list from a file, and out/ is gitignored, so without this the
+# receiving machine would have to be handed the manifest by hand -- next to an
+# archive it must already be given.  Kept in the repository, it is also
+# reviewable: `git show conan/lists/pkglist-release.json` is the exact answer to
+# "which binaries are we shipping".
+LISTS_DIR="$SCRIPT_DIR/../conan/lists"
+
 # The graph that gets packaged MUST be resolved with the same option the deps
 # stage used, or the archive ships the wrong closure and the receiving machine
 # still cannot configure.
@@ -76,7 +89,7 @@ fi
 
 mkdir -p "$CONAN_OUT"
 
-set_section="1/5  resolve the $CONFIG dependency graph ($BUILD_TYPE)"
+set_section="1/6  resolve the $CONFIG dependency graph ($BUILD_TYPE)"
 say "$set_section"
 # (top level, not a function -- plain assignment, `local` is not allowed here)
 # Qt needs no flag here: it is an unconditional require in conanfile.py, so it is
@@ -130,7 +143,7 @@ printf '      build type   : %s\n' "$BUILD_TYPE"
     --format=json > "$GRAPH_JSON" || exit 1
 printf '      -> %s\n' "$GRAPH_JSON"
 
-say "2/5  list the exact recipe + package revisions"
+say "2/6  list the exact recipe + package revisions"
 "$AOI_CONAN" list --graph="$GRAPH_JSON" --format=json > "$PKG_JSON" || exit 1
 printf '      -> %s\n' "$PKG_JSON"
 
@@ -168,7 +181,7 @@ MUST_HAVE="vtk qt pcre2 zlib opencv pcl catch2 boost fmt spdlog openssl sqlite3
            freetype libpng harfbuzz glib libpq eigen taskflow double-conversion
            brotli md4c lz4 bzip2 libiconv libffi"
 
-say "3/5  verify the package list carries binaries"
+say "3/6  verify the package list carries binaries"
 printf '      binaries in pkglist : %s\n' \
        "$(grep -cE '^ {24}"[0-9a-f]{40}": \{$' "$PKG_JSON" || true)"
 missing=""
@@ -194,7 +207,26 @@ if [ -n "$missing" ]; then
 fi
 printf '      all %s required packages have a binary\n' "$(printf '%s' "$MUST_HAVE" | wc -w)"
 
-say "4/5  normalize unreadable NTFS reparse points in the cache"
+say "4/6  publish the package list into the repository"
+# Written only after the gate above, so the tracked file can never describe a
+# list that was rejected.  It is deliberately NOT optional: scripts/upload-cache.sh
+# reads conan/lists/pkglist-<config>.json, and a stale one is the failure mode
+# that costs the most time -- somebody uploads yesterday's revisions, gets a
+# successful exit, and the receiving machine cannot resolve this lockfile.
+mkdir -p "$LISTS_DIR" || exit 1
+cp "$PKG_JSON" "$LISTS_DIR/pkglist-$CONFIG.json" || exit 1
+printf '      -> %s\n' "$LISTS_DIR/pkglist-$CONFIG.json"
+if command -v git >/dev/null 2>&1 && git -C "$SCRIPT_DIR/.." rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  # `git status`, not `git diff`: on the first run the file is untracked and
+  # `git diff` stays silent about it, which is exactly when the reminder matters.
+  if [ -n "$(git -C "$SCRIPT_DIR/.." status --porcelain -- "conan/lists/pkglist-$CONFIG.json" 2>/dev/null)" ]; then
+    printf '      [note] that file is tracked and is not what HEAD says -- commit it\n'
+    printf '             together with the archive, or the two describe different\n'
+    printf '             sets of packages.\n'
+  fi
+fi
+
+say "5/6  normalize unreadable NTFS reparse points in the cache"
 # msys2 ships bin/msys64/etc/mtab as an *LX symlink* reparse point
 # (IO_REPARSE_TAG_LX_SYMLINK = 0xA000001D).  NTFS has no handler for that tag,
 # so no native Windows process can open the file at all -- whether the link
@@ -237,7 +269,7 @@ fi
 }
 printf '      msys2 package: integrity ok\n'
 
-say "5/5  save the cache snapshot"
+say "6/6  save the cache snapshot"
 # An interrupted `conan cache save` leaves a zero-byte "<archive>.dirty" marker
 # beside the archive, and every later run then aborts with
 #     ERROR: Folder '<archive>' is already dirty

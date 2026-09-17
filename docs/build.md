@@ -32,6 +32,8 @@ loop (TaskControl + Runtime + tests), which then needs Qt but not VTK.
 | `scripts/prefetch-sources.sh` | pre-download dependency sources into the Conan sources cache, so a build needs no network |
 | `scripts/package-cache.sh` | build an offline cache bundle: `out/conan-cache-debug.tgz`, or `out/conan-cache-release.tgz` with `AOI_CACHE_CONFIG=release` |
 | `scripts/verify-bundle.sh` | restore a bundle into an empty cache and build, test **and run** the project from it (same `AOI_CACHE_CONFIG` switch) |
+| `scripts/upload-cache.sh` | push a bundle's packages to a Conan remote, from the tracked manifest (`conan/lists/`), with preflight checks and a read-back |
+| `scripts/pkglist-refs.py` | turn a pkglist into one `ref#revision:package_id` line per binary, or into a private-packages-only subset |
 | `scripts/package-debug-cache.sh`, `scripts/verify-debug-bundle.sh` | the original Debug-only entry points; now one-line wrappers that set `AOI_CACHE_CONFIG=debug` |
 | `scripts/normalize-cache-reparse.py` | repair unreadable NTFS reparse points before `conan cache save` |
 
@@ -605,39 +607,99 @@ configuration step. Do not reintroduce legacy `.pro`, `.pri`, `.props` or
 ## Offline cache package
 
 When the package remote is unreachable (offline machine, blocked JFrog CE),
-move binaries as a cache bundle instead of uploading them directly.
+move binaries as a cache bundle instead of uploading them directly. One bundle
+per configuration; three scripts cover the whole round trip.
 
 ```powershell
-# 1. Resolve one configuration and export its exact package list.
-#    Everything is already cached, so this step is fast.
-#    All three options below are mandatory here:
-#      -o "&:with_shrimp=True"  the packaged graph must match the graph the
-#                            build used, otherwise the bundle ships without
-#                            qt/6.8.3 and without the private VTK package, and
-#                            the receiving machine still fails to configure
-#                            (or has to compile VTK itself; ~26 minutes measured here)
-#      --build=missing
-#      -c:a tools.graph:skip_binaries=False
-conan install . --lockfile=conan.lock --build=missing -c:a tools.graph:skip_binaries=False -pr:h=conan/profiles/windows-msvc-v143-x64 -pr:b=conan/profiles/windows-msvc-v143-x64 -s:h build_type=Debug -o "&:with_shrimp=True" --output-folder=out/conan/debug --format=json > out/conan/debug/graph.json
-conan list --graph=out/conan/debug/graph.json --format=json > out/conan/debug/pkglist.json
+# 1. Pack.  Resolves the graph, checks it carries binaries, writes the tracked
+#    manifest, normalizes the msys2 reparse point, saves and verifies the gzip.
+bash scripts/package-cache.sh                                    # -> out/conan-cache-debug.tgz
+AOI_CACHE_CONFIG=release bash scripts/package-cache.sh           # -> out/conan-cache-release.tgz
 
-# 2. Pack those packages (host Debug binaries plus the Release tool packages).
-#    msys2's bin/msys64/etc/mtab is an LX symlink reparse point that no native
-#    Windows process can open, which aborts the command below until it is
-#    normalized (see "conan cache save cannot archive msys2's etc/mtab").
-python scripts/normalize-cache-reparse.py "%USERPROFILE%\.conan2\p"
-conan cache save --list=out/conan/debug/pkglist.json --file=conan-cache-debug.tgz
-
-# 3. On a machine with remote access:
-conan cache restore conan-cache-debug.tgz
-conan remote add <remote-name> https://<host>/artifactory/api/conan/<repo>
-conan upload --list=out/conan/debug/pkglist.json -r <remote-name> --confirm
-
-# 4. Before carrying the file anywhere, prove that it is usable by restoring it
-#    into an empty cache and building from there:
+# 2. Prove the archive is usable by restoring it into an EMPTY cache and
+#    building, testing and running the project from there.  Do this before
+#    carrying the file anywhere.
 bash scripts/verify-bundle.sh                                    # Debug
 AOI_CACHE_CONFIG=release bash scripts/verify-bundle.sh           # Release
+
+# 3. On the machine that can reach the remote:
+conan cache restore out/conan-cache-debug.tgz
+conan cache restore out/conan-cache-release.tgz
+conan remote add <remote-name> https://<host>/artifactory/api/conan/<repo>
+conan remote login <remote-name> <user>          # token, if the repo wants one
+bash scripts/upload-cache.sh -r <remote-name>    # both configs
+
+#    ...or only the packages no remote can serve, and then only check:
+bash scripts/upload-cache.sh -r <remote-name> --only-private
+bash scripts/upload-cache.sh -r <remote-name> --verify-only
 ```
+
+### The manifests are tracked in git
+
+`conan/lists/pkglist-<config>.json` is a copy of the list `package-cache.sh`
+resolved while writing the archive (47 recipes and 53 Debug / 47 Release
+binaries). It is in the repository on purpose: `conan upload` takes its work
+list from a file (`--list=`) and `out/` is gitignored, so without it the
+receiving side would need the manifest handed over by hand, next to an archive
+it must already be given. It also makes the hand-off reviewable — `git show
+conan/lists/pkglist-release.json` answers "which binaries are we shipping?"
+exactly. Re-running `package-cache.sh` rewrites it and says so if the result
+differs from `HEAD`; commit the two together or they describe different things.
+
+### `upload-cache.sh` checks three ways before it pushes anything
+
+| check | why |
+|---|---|
+| the private package is in the *local* cache, with the package id this config expects | `vtk/9.5.0@aoi/stable` is the only entry no remote can supply, and its package id differs per build type (`278fb94f…` Debug vs `b7c91f41…` Release) — so this one line catches "you restored the wrong archive" |
+| the remote answers at all | `conan list -r <name>` exits 1 for an unknown or unusable remote, but 0 for a reachable one that simply lacks the package, so the probe asks for a package that is *expected* to be absent |
+| no blob in `core.sources:download_cache/s/` is missing its `<sha256>.json` | see below — this one fails *after* the artifacts are uploaded |
+
+Then it uploads, and finally asks the remote for every entry in the manifest:
+`conan upload` reports success for artifacts the server already had and for a
+repository that takes the recipe and refuses the binaries, so nothing is
+believed until it is read back. A single missing entry fails the run and is
+named.
+
+Three traps that cost time while this was written, all of them Windows-only:
+
+* **Windows Python writes `\r\n`.** A row read into `bash` keeps the carriage
+  return, and Git for Windows' `grep` cannot match a pattern containing one — so
+  the read-back reported "3 of 3 entries did not come back from the remote" for
+  an upload that had in fact succeeded. Fixed at the source
+  (`sys.stdout.reconfigure(newline="\n")` in `pkglist-refs.py`) plus a defensive
+  strip in the shell: a verification that cannot say "yes" is worse than no
+  verification at all.
+* **`local a="$1" b="$a/x"` on one line dies under `set -u`** with
+  `a: unbound variable`, because the second assignment reads the *new* local `a`,
+  which is still unset at that moment. One `local` per line in `upload-cache.sh`
+  and `prefetch-sources.sh`.
+* **`conan config get <key>` does not exist** in Conan 2.32 — it answers with the
+  usage text and exit code 2. It is `conan config show <key>`; `conan config
+  list` prints the key's *description*, not its value.
+
+### `conan upload` aborts on a sources-cache blob that has no metadata
+
+`conan upload` walks `core.sources:download_cache/s/` to decide which downloaded
+sources to push as *backup sources*, and raises
+
+```
+ERROR: Missing metadata file for backup source <path>
+```
+
+on the first blob that has no `<sha256>.json` beside it
+(`conan/internal/rest/download_cache.py`, `get_backup_sources_files`). It raises
+even when that blob belongs to a package nobody is uploading, and it raises
+*after* the artifacts are already on the server — which is how it reads as a
+network or permission problem.
+
+A cache filled by Conan itself always has the metadata; a cache filled by hand
+did not. `scripts/prefetch-sources.sh` now writes it as it fetches (and repairs
+old blobs when re-run, since the "already cached" path writes it too), and
+`upload-cache.sh` refuses to start while any blob lacks one, with
+`--repair-source-metadata` to add the missing file. The reference cannot be
+recovered from the cache — the sha256 is the only key — so that repair writes an
+empty `references` map: inert rather than mis-attributed. Sources stay usable
+either way, because Conan finds them by sha256 and never reads this file.
 
 ### Why `-c:a tools.graph:skip_binaries=False` is not optional
 
@@ -726,12 +788,14 @@ AOI_CACHE_CONFIG=release bash scripts/verify-bundle.sh          # empty-cache ch
 still work: they are one-line wrappers that set `AOI_CACHE_CONFIG=debug`.)
 
 The two configurations share almost the whole graph — Qt, zlib, Boost, OpenSSL
-and the rest come from ConanCenter in both — but the two packages that only this
+and the rest come from ConanCenter in both — but the one package that only this
 repository can supply must exist for **each** build type:
 
-* `vtk/9.5.0@aoi/stable`, created by `bash scripts/build-debug.sh vtk-release`
-  for Release and by `bash scripts/build-debug.sh vtk` for Debug. This is the
-  step that needs a Release Qt in the cache; see *The private VTK package*.
+* `vtk/9.5.0@aoi/stable`, created by `bash scripts/build-debug.sh vtk` for Debug
+  and `bash scripts/build-debug.sh vtk-release` for Release. Both build types are
+  in the two archives below, so this only has to be run to recreate them (or on a
+  machine that has no archive); the Release half needs a Release Qt in the cache,
+  see *The private VTK package*.
 * nothing else. `qt/6.8.3` and friends are ordinary ConanCenter packages.
 
 `conan.lock` pins **recipe revisions only**, so the Release package lands under the
@@ -740,14 +804,15 @@ covers both. **Do not regenerate the lockfile** when adding the Release half —
 instructions that tell the receiving side to run `conan lock create` are wrong and
 break the Debug build that already works.
 
-Adding the Release snapshot is mostly plumbing, but two things cost real time the
-first time and are worth knowing up front:
+`package-cache.sh` installs the configuration it is asked for, so producing either
+archive needs no manual step. The two things that cost real time here are worth
+knowing up front:
 
-* the Release graph has to be installed before anything can be resolved —
-  `conan install … -s:h build_type=Release --output-folder=out/conan/release`
-  (that is what happened here first; the packaging script does not do it for you,
-  it only *resolves* and refuses to write an archive whose pkglist has a package
-  without a binary);
+* if the requested build type was never installed the resolve finds no binary, and
+  the script refuses to write the archive, naming the packages and the
+  `conan install` command that fixes it. That is the intended failure: a pkglist
+  with a package that has no binary describes a bundle that only works on a
+  machine with a warm cache;
 * `Shrimp --selftest` must be flushed, not just written. `std::cout << "…\n"`
   leaves the bytes in the CRT buffer until exit, and those lines are the only
   evidence the `run` stage accepts — see *Build Shrimp*.
