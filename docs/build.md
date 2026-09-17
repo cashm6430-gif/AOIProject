@@ -87,16 +87,20 @@ C:\Users\Administrator\.conan2   ->  D:\conan2      (directory junction)
 
 The junction is deliberate rather than `CONAN_HOME=D:\conan2`:
 
-* Conan keeps seeing `C:\Users\Administrator\.conan2`, so absolute paths already
-  baked into generated files stay valid. The package trees under
-  `<home>/p/b/<pkg>/p/` contain CMake files that record the home they were
-  generated under; pointing Conan at a different home turns those into dead
-  paths and the failure surfaces as a confusing `find_package` error.
-* `scripts/_env.sh` deliberately unsets `CONAN_HOME` in its "Locate Conan"
-  block — it has to, because that shell speaks `/c/Users/...` and Conan rejects
-  a POSIX path with `Invalid CONAN_HOME value`. A `CONAN_HOME` set in the system
-  environment is therefore discarded by every project script, while the junction
-  needs no cooperation from them at all.
+* It keeps generated files valid. Conan keeps seeing
+  `C:\Users\Administrator\.conan2`, so the absolute paths already baked into
+  generated files stay valid — the package trees under `<home>/p/b/<pkg>/p/`
+  contain CMake files that record the home they were generated under, and
+  pointing Conan at a home with a different path turns those into dead paths,
+  surfacing later as a confusing `find_package` error.
+* It needs no cooperation from anything. `scripts/_env.sh` resolves `AOI_CONAN_HOME`
+  (default `$HOME/.conan2`) and exports the converted `CONAN_HOME`, so the
+  scripts hand Conan the very `C:` path the compiler and CMake already recorded
+  — and a bare `conan` run from CMD, PowerShell or an IDE, which reads the
+  default home without any of our scripts, lands on the same bytes.
+  `AOI_CONAN_HOME` is for *isolated* homes (`verify-bundle.sh` points it at
+  `out/verify/<config>/conan-home`); using it to relocate the developer cache
+  would cover only the invocations that inherit it.
 
 A junction is a **link, not a copy**. Deleting `C:\Users\Administrator\.conan2`
 with `rmdir` (or `Remove-Item` without `-Recurse`) removes the link and leaves
