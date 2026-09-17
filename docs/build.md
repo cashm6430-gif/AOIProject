@@ -32,8 +32,9 @@ loop (TaskControl + Runtime + tests), which then needs Qt but not VTK.
 | `scripts/prefetch-sources.sh` | pre-download dependency sources into the Conan sources cache, so a build needs no network |
 | `scripts/package-cache.sh` | build an offline cache bundle: `out/conan-cache-debug.tgz`, or `out/conan-cache-release.tgz` with `AOI_CACHE_CONFIG=release` |
 | `scripts/verify-bundle.sh` | restore a bundle into an empty cache and build, test **and run** the project from it (same `AOI_CACHE_CONFIG` switch) |
+| `scripts/check-cache.sh` | compare the local cache against the tracked manifests — "did `conan cache restore` really deliver the archive?", read-only, offline, ~1 s |
 | `scripts/upload-cache.sh` | push a bundle's packages to a Conan remote, from the tracked manifest (`conan/lists/`), with preflight checks and a read-back |
-| `scripts/pkglist-refs.py` | turn a pkglist into one `ref#revision:package_id` line per binary, or into a private-packages-only subset |
+| `scripts/pkglist-refs.py` | turn a pkglist into one `ref#revision:package_id` line per binary, into a private-packages-only subset, into the rows a cache is missing, or into the revisions a reference has |
 | `scripts/package-debug-cache.sh`, `scripts/verify-debug-bundle.sh` | the original Debug-only entry points; now one-line wrappers that set `AOI_CACHE_CONFIG=debug` |
 | `scripts/normalize-cache-reparse.py` | repair unreadable NTFS reparse points before `conan cache save` |
 
@@ -608,7 +609,7 @@ configuration step. Do not reintroduce legacy `.pro`, `.pri`, `.props` or
 
 When the package remote is unreachable (offline machine, blocked JFrog CE),
 move binaries as a cache bundle instead of uploading them directly. One bundle
-per configuration; three scripts cover the whole round trip.
+per configuration; four scripts cover the whole round trip.
 
 ```powershell
 # 1. Pack.  Resolves the graph, checks it carries binaries, writes the tracked
@@ -625,6 +626,7 @@ AOI_CACHE_CONFIG=release bash scripts/verify-bundle.sh           # Release
 # 3. On the machine that can reach the remote:
 conan cache restore out/conan-cache-debug.tgz
 conan cache restore out/conan-cache-release.tgz
+bash scripts/check-cache.sh                      # did both restores land?
 conan remote add <remote-name> https://<host>/artifactory/api/conan/<repo>
 conan remote login <remote-name> <user>          # token, if the repo wants one
 bash scripts/upload-cache.sh -r <remote-name>    # both configs
@@ -633,6 +635,52 @@ bash scripts/upload-cache.sh -r <remote-name>    # both configs
 bash scripts/upload-cache.sh -r <remote-name> --only-private
 bash scripts/upload-cache.sh -r <remote-name> --verify-only
 ```
+
+### Check the restore before blaming the archive
+
+`conan cache restore` only ever *adds* to a cache and says nothing about what
+was already there, so three different mistakes are indistinguishable from the
+outside: restoring one archive out of two, restoring into a cache that still
+holds an unrelated state, and a transfer that arrived truncated. All three leave
+a graph that resolves only partially, and the failure surfaces one step later,
+inside `conan create`, on whichever dependency is reached first. Here that
+dependency is qt (`vtk/9.5.0@aoi/stable` requires it), so a Debug build over a
+cache that holds only the Release qt stops with a message about **qt** — while
+the file that never arrived is a different archive entirely.
+
+`scripts/check-cache.sh` asks the question underneath instead: is every binary
+the manifest names in this cache?
+
+```bash
+bash scripts/check-cache.sh                  # both configurations
+bash scripts/check-cache.sh --config=debug
+```
+
+It runs `conan list "*#*:*" --format=json` once (0.8 s, 47 recipes) and
+subtracts both tracked manifests from that answer; it contacts no remote and
+writes nothing but its own scratch files under `out/check-cache/`. The exit
+status is 0 only when every requested configuration is complete.
+
+Two details it depends on:
+
+* **`"*#*:*"`, not `"*:*"`.** A pattern that names no revision resolves to the
+  *latest* one, so `"*:*"` omits every revision a recipe has ever had and would
+  report a manifest entry pinned to an older revision as absent while that
+  binary sits in the cache. `conan list` also takes a single pattern only —
+  passing two is answered with `unrecognized arguments` — so a per-entry loop
+  would be 47 process starts per configuration for the same answer.
+* **Comparing it against both manifests, not just the requested one.** Debug and
+  Release are different package ids under the same recipe revisions, so a
+  complete Release cache contains nothing of Debug. That makes the useful
+  diagnosis available: when the requested configuration is incomplete and the
+  other is perfect, the cause is "the wrong archive was restored", and the
+  script says so and prints the one `conan cache restore` that fixes it.
+  Restoring into a half-filled cache is safe — nothing has to be cleaned first.
+
+It also prints which revisions of `vtk/9.5.0@aoi/stable` the cache holds next to
+the one `conan.lock` pins. A cache carrying only a *stale* revision of a rebuilt
+recipe looks empty to the resolver but not to `conan list`, and that needs a
+build rather than a restore.
 
 ### The manifests are tracked in git
 
