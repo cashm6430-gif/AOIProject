@@ -58,10 +58,10 @@ export LIB="$AOI_VC_DIR\\lib\\x64;$AOI_SDK_DIR\\Lib\\$AOI_SDK_VER\\um\\x64;$AOI_
 export PATH="/c/Program Files (x86)/Windows Kits/10/bin/$AOI_SDK_VER/x64:/c/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64:$PATH"
 
 # --- 3. Locate Conan ---------------------------------------------------------
-# The Conan 2 cache root, in the shell's own POSIX form, used only for local
-# filesystem searching below.  Do NOT export CONAN_HOME from here: this shell
-# speaks "/c/Users/..." while Conan requires a native absolute path and aborts
-# with "Invalid CONAN_HOME value".  Conan finds its default cache on its own.
+# The Conan 2 cache root in the shell's own POSIX form. Callers can set
+# AOI_CONAN_HOME to use an isolated or transferred cache; it is also used for
+# local filesystem searching below. Conan itself needs a native absolute path,
+# so export its converted form only after AOI_WINPATH is available.
 if [ -z "${AOI_CONAN_HOME:-}" ]; then
   for cand in "$HOME/.conan2" "/c/Users/$USERNAME/.conan2" "/c/Users/Administrator/.conan2"; do
     [ -d "$cand" ] && { AOI_CONAN_HOME="$cand"; break; }
@@ -70,11 +70,15 @@ fi
 export AOI_CONAN_HOME
 
 # Conan flags reject POSIX paths, so hand it the mixed form ("E:/a/b").
-unset CONAN_HOME
 if command -v cygpath >/dev/null 2>&1; then
   AOI_WINPATH() { cygpath -m "$1"; }
 else
   AOI_WINPATH() { printf '%s' "$1"; }
+fi
+if [ -n "${AOI_CONAN_HOME:-}" ]; then
+  export CONAN_HOME="$(AOI_WINPATH "$AOI_CONAN_HOME")"
+else
+  unset CONAN_HOME
 fi
 
 # --- 3b. Stop the host's safe-delete shim from killing Conan mid-package ----
