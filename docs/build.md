@@ -70,6 +70,47 @@ On the current machine it lives in
 `C:\Users\Administrator\AppData\Local\Python\pythoncore-3.14-64\Scripts`.
 Do not hardcode any user name in build scripts; read it from `PATH`.
 
+### Where the developer cache lives
+
+Conan 2 has exactly one location switch: `CONAN_HOME`, defaulting to
+`%USERPROFILE%\.conan2`. Everything the cache holds sits under it — the recipe
+and source trees, the built packages, and the *per-package build directory* a
+`conan create` compiles in (`<home>/p/b/<hash>/b`). There is no separate
+"intermediate directory" setting, so moving the home moves all of it, the
+build trees included.
+
+On this workstation the bytes are on `D:` while the path is still on `C:`:
+
+```console
+C:\Users\Administrator\.conan2   ->  D:\conan2      (directory junction)
+```
+
+The junction is deliberate rather than `CONAN_HOME=D:\conan2`:
+
+* Conan keeps seeing `C:\Users\Administrator\.conan2`, so absolute paths already
+  baked into generated files stay valid. The package trees under
+  `<home>/p/b/<pkg>/p/` contain CMake files that record the home they were
+  generated under; pointing Conan at a different home turns those into dead
+  paths and the failure surfaces as a confusing `find_package` error.
+* `scripts/_env.sh` deliberately unsets `CONAN_HOME` in its "Locate Conan"
+  block — it has to, because that shell speaks `/c/Users/...` and Conan rejects
+  a POSIX path with `Invalid CONAN_HOME value`. A `CONAN_HOME` set in the system
+  environment is therefore discarded by every project script, while the junction
+  needs no cooperation from them at all.
+
+A junction is a **link, not a copy**. Deleting `C:\Users\Administrator\.conan2`
+with `rmdir` (or `Remove-Item` without `-Recurse`) removes the link and leaves
+`D:\conan2` alone; `rm -rf` or `Remove-Item -Recurse` follows it and deletes the
+whole 14 GB cache on `D:`. To reclaim `C:` space, delete the link.
+
+Moving this directory invalidates nothing — recipe revisions and package ids
+hash file contents, not paths — but prove it anyway before trusting a build:
+
+```console
+bash scripts/check-cache.sh        # 53 Debug + 47 Release binaries, against the tracked manifests
+bash scripts/check-cache.sh --config=release
+```
+
 ## Build the project
 
 `conan/recipes/vtk` has to be created first — see *Build the private VTK package*
