@@ -560,7 +560,10 @@ stage_run() {
 
 stage_package() {
   say "package: conan cache save"
-  bash "$SCRIPT_DIR/package-debug-cache.sh"
+  # package-cache.sh takes the configuration as AOI_CACHE_CONFIG and defaults to
+  # debug, which is this driver's configuration.  The Debug-only name it used to
+  # have is still there as a wrapper for anything that calls it by hand.
+  bash "$SCRIPT_DIR/package-cache.sh"
 }
 
 # --- main ------------------------------------------------------------------

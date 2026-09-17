@@ -30,8 +30,9 @@ loop (TaskControl + Runtime + tests), which then needs Qt but not VTK.
 | `scripts/build-debug.sh` | the driver above |
 | `scripts/_env.sh` | shared environment: VS2022 + Windows SDK variables, duplicate-case proxy de-dup, Conan/Ninja lookup. Sourced, not executed |
 | `scripts/prefetch-sources.sh` | pre-download dependency sources into the Conan sources cache, so a build needs no network |
-| `scripts/package-debug-cache.sh` | build the offline cache bundle (`out/conan-cache-debug.tgz`) |
-| `scripts/verify-debug-bundle.sh` | restore that bundle into an empty cache and build, test **and run** the project from it |
+| `scripts/package-cache.sh` | build an offline cache bundle: `out/conan-cache-debug.tgz`, or `out/conan-cache-release.tgz` with `AOI_CACHE_CONFIG=release` |
+| `scripts/verify-bundle.sh` | restore a bundle into an empty cache and build, test **and run** the project from it (same `AOI_CACHE_CONFIG` switch) |
+| `scripts/package-debug-cache.sh`, `scripts/verify-debug-bundle.sh` | the original Debug-only entry points; now one-line wrappers that set `AOI_CACHE_CONFIG=debug` |
 | `scripts/normalize-cache-reparse.py` | repair unreadable NTFS reparse points before `conan cache save` |
 
 Everything below explains *why* those scripts are shaped the way they are.
@@ -110,7 +111,7 @@ fails — a symptom that looks nothing like "somebody ran a second Conan install
 
 `scripts/build-debug.sh` pins the file to the folder its `deps` stage installed
 into on every run, so re-running `deps` repairs it, and
-`scripts/verify-debug-bundle.sh` saves and restores the file around its own
+`scripts/verify-bundle.sh` saves and restores the file around its own
 install. The file is generated and git-ignored (`/CMakeUserPresets.json`), and
 nothing in `CMakePresets.json` depends on it — the project's own `debug`,
 `relwithdebuginfo` and `release` presets carry their toolchain path themselves.
@@ -136,7 +137,7 @@ deliberate and not optional:
   (libiconv among them, which is a slow autotools build otherwise).
 
 Do not remove `build_type` from the profile to "keep it generic", and do not add
-it per-command — one place keeps `build-debug.sh` and `package-debug-cache.sh`
+it per-command — one place keeps `build-debug.sh` and `package-cache.sh`
 in agreement.
 
 The Debug and Release commands intentionally use separate Conan folders and
@@ -259,27 +260,29 @@ $ AOI_FORCE_VTK=1 bash scripts/build-debug.sh vtk   # rebuild anyway
 
 The build type is a stage input (`AOI_VTK_BUILD_TYPE`, default `Debug`), not a
 constant inside the stage, and it is validated before anything compiles. That is
-not tidiness: the delivery bundle carries only the binaries this driver resolves,
-i.e. Debug, so a colleague who needs a Release build has to create
-`vtk/9.5.0@aoi/stable` for Release themselves and upload it to the company
-remote. With the build type baked in they would have had to run `conan create` by
-hand — outside `normalize_recipe_eol()` and the revision guard, which are exactly
-the two things that make that rebuild land on the revision `conan.lock` pins. The
-revision does not depend on the build type, so `vtk-release` checks the same
-value `vtk` does.
+not tidiness: `vtk/9.5.0@aoi/stable` exists in no remote, so **each build type
+has to be created here** — the Debug package for the Debug bundle, the Release
+package for the Release bundle — and the Release one is easy to get wrong. With
+the build type baked into the stage it had to be produced by a hand-written
+`conan create`, i.e. outside `normalize_recipe_eol()` and the revision guard,
+which are exactly the two things that make the result land on the revision
+`conan.lock` pins. The revision does not depend on the build type, so
+`vtk-release` checks the same value `vtk` does.
 
-Release needs a *Release* Qt, which **this machine's cache does not have** (0
-Release packages against 1 Debug), so `vtk-release` here gets past the recipe
-guard and then stops with:
+Release needs a *Release* Qt. On a machine whose cache has only the Debug one (0
+Release packages against 1 Debug) `vtk-release` gets past the recipe guard and
+then stops in seconds with:
 
 ```
 ERROR: Missing prebuilt package for 'qt/6.8.3'
 ERROR: conan create failed (exit 1). See out/vtk-create-release.log
 ```
 
-That failure is the stage working, not failing: it costs seconds and names the
-one thing the machine lacks, whereas a hand-written `conan create` costs the
-26-minute VTK compile before reaching the same conclusion.
+That failure is the stage working, not failing: it names the one thing the
+machine lacks instead of spending the 26-minute VTK compile to reach the same
+conclusion. Warm the Release graph first (`conan install … -s:h
+build_type=Release --output-folder=out/conan/release`, which is what the release
+half of *Offline cache package* does) and the same stage runs to completion.
 
 By hand (equivalent, but without the guard):
 
@@ -526,7 +529,7 @@ command-line grep utility. Verified: with `PCRE2_SUPPORT_LIBZ=OFF` /
 
 Because the pin lives in the profile, every command that resolves the graph
 picks it up — `conan install`, `conan graph info`,
-`scripts/build-debug.sh` and `scripts/package-debug-cache.sh` — so nothing else
+`scripts/build-debug.sh` and `scripts/package-cache.sh` — so nothing else
 has to carry the option.
 
 ### Retries: transient only
@@ -560,8 +563,24 @@ in perfectly healthy builds. The same care applies to `error C####` versus
 
 `Shrimp` uses the checked-in `TaskControl` API. Its ROI measurement recipe
 injects an input point, filters the point cloud, fits a plane, measures the
-distance, then aggregates the tolerance result. `AOI_BUILD_SHRIMP` remains OFF
-by default because Shrimp needs the private VTK package.
+distance, then aggregates the tolerance result. `AOI_BUILD_SHRIMP` is **ON** by
+default (top-level `CMakeLists.txt`) because Shrimp *is* the application; it needs
+the private VTK package, so a machine without one must set
+`-DAOI_BUILD_SHRIMP=OFF`. The driver never leaves that to the default: it passes
+`ON`/`OFF` explicitly in both directions, because a bundle check must not depend
+on which way a CMake default happens to point.
+
+`Shrimp --selftest` is the project's acceptance test, and it is read by grepping
+for `END-TO-END PASS` — so it has to **flush** what it prints. It did not, and the
+symptom is worth remembering: `std::cout << "..." << "\n"` only ends the line; the
+bytes sit in the C runtime's stdout buffer until the stream is flushed at exit,
+and this process can leave without that happening. Measured: runs whose exit code
+was `0` (which is `rows > 0`, i.e. the load → ROI → measure path had worked)
+sometimes printed none of the three summary lines — and a run in the project root
+and one in an empty directory gave different answers from the *same binary*, which
+is what sent the investigation down the wrong path for a while. `std::endl` plus
+an explicit `std::cout.flush()` in `PointCloudWidgetSelfTest` (`Shrimp/main.cpp`)
+fix it. Anything else that prints a machine-read verdict should do the same.
 
 `TaskControl` still exposes a C++ API. Cross-process or independently built
 plug-ins should use `TaskControl_C.h` until its C++ boundary is redesigned.
@@ -616,7 +635,8 @@ conan upload --list=out/conan/debug/pkglist.json -r <remote-name> --confirm
 
 # 4. Before carrying the file anywhere, prove that it is usable by restoring it
 #    into an empty cache and building from there:
-bash scripts/verify-debug-bundle.sh
+bash scripts/verify-bundle.sh                                    # Debug
+AOI_CACHE_CONFIG=release bash scripts/verify-bundle.sh           # Release
 ```
 
 ### Why `-c:a tools.graph:skip_binaries=False` is not optional
@@ -652,18 +672,19 @@ of its nodes skipped, which fixes exactly half the graph.
 
 ### What the bundle contains
 
-The resolved pkglist holds **47 recipe references and 53 binary packages**, and
+The Debug pkglist holds **47 recipe references and 53 binary packages**, and
 every one of those references carries at least one binary — nothing in the
-consumer's closure is missing. A few references contribute two binaries each
-(`conan list` merges every revision of a package into one entry), which is why
-53 is larger than 47.
+consumer's closure is missing. Six references contribute two binaries each:
+those are the packages that appear in *both* contexts, and the Debug resolve has
+host = Debug with build = Release. The Release pkglist has the same 47
+references and exactly 47 binaries, because there both contexts are Release.
 
 The largest single entry is the private `vtk/9.5.0@aoi/stable` package: 551 MB
-unpacked, and the reason the archive went from 2.5 GiB (Qt-only graph) to
-2.7 GiB. It is also the entry nothing else can stand in for, because it exists
+unpacked in Debug, and the reason the archive went from 2.5 GiB (Qt-only graph)
+to 2.7 GiB. Release builds are smaller, so `conan-cache-release.tgz` is too. It is also the entry nothing else can stand in for, because it exists
 in no remote — a bundle without it does not fail here, it fails as a ~26 minute
 `conan create` on the receiving machine. `MUST_HAVE` in
-`scripts/package-debug-cache.sh` therefore names `vtk` first.
+`scripts/package-cache.sh` therefore names `vtk` first.
 
 Earlier revisions of this document claimed that ten packages (`cmake/4.4.3`,
 `b2`, `nasm`, `openexr`, `imath`, `libjpeg`, `libtiff`, `libdeflate`,
@@ -674,7 +695,7 @@ writes them into the archive. (The old "53 binaries" figure came from a
 multi-remote listing that counted one `nasm` binary living on the `conancenter`
 remote; the cache-only pkglist has 52.)
 
-`scripts/package-debug-cache.sh` runs all of the above and **refuses to write
+`scripts/package-cache.sh` runs all of the above and **refuses to write
 the archive** unless the pkglist carries a binary for every package the build
 links (Qt, pcre2, OpenCV, PCL, zlib, Boost, Catch2, …), so a regression here
 fails loudly instead of at the far end of the transfer.
@@ -683,28 +704,53 @@ fails loudly instead of at the far end of the transfer.
 self-contained. Build tools such as `msys2` are ~245 MB; drop them from
 `pkglist.json` first if the bundle has to stay small.
 
-### The bundle covers one build type
+### One bundle per build type
 
-Those 53 binaries describe the graph that was resolved — host **Debug**. A Release
-build of the same project needs Release binaries for every host requirement, and
-they are not in the archive. Exactly one of them needs a person:
+A snapshot holds the binaries of the build type it was resolved with, and Debug
+and Release are different package ids under the same recipe revisions, so **two
+archives exist and both are produced here**:
 
-| package | where the Release binary comes from |
-|---|---|
-| `qt`, `zlib`, `boost`, `openssl`, … | ConanCenter, or the company remote |
-| `vtk/9.5.0@aoi/stable` | whoever has a **Release Qt** must create and upload it |
+| archive | configuration | what it is for |
+|---|---|---|
+| `out/conan-cache-debug.tgz` | host `Debug` | the day-to-day build, the tests, the Shrimp selftest |
+| `out/conan-cache-release.tgz` | host `Release` | a Release build of the same project, no rebuild of anything |
 
 ```bash
-bash scripts/build-debug.sh vtk-release        # guard: refuses to compile unless
-                                               # the recipe revision matches conan.lock
-conan upload 'vtk/9.5.0@aoi/stable' -r <remote> --confirm
+bash scripts/package-cache.sh                                  # -> conan-cache-debug.tgz
+AOI_CACHE_CONFIG=release bash scripts/package-cache.sh          # -> conan-cache-release.tgz
+bash scripts/verify-bundle.sh                                   # empty-cache check, Debug
+AOI_CACHE_CONFIG=release bash scripts/verify-bundle.sh          # empty-cache check, Release
 ```
+
+(The names `scripts/package-debug-cache.sh` and `scripts/verify-debug-bundle.sh`
+still work: they are one-line wrappers that set `AOI_CACHE_CONFIG=debug`.)
+
+The two configurations share almost the whole graph — Qt, zlib, Boost, OpenSSL
+and the rest come from ConanCenter in both — but the two packages that only this
+repository can supply must exist for **each** build type:
+
+* `vtk/9.5.0@aoi/stable`, created by `bash scripts/build-debug.sh vtk-release`
+  for Release and by `bash scripts/build-debug.sh vtk` for Debug. This is the
+  step that needs a Release Qt in the cache; see *The private VTK package*.
+* nothing else. `qt/6.8.3` and friends are ordinary ConanCenter packages.
 
 `conan.lock` pins **recipe revisions only**, so the Release package lands under the
 same revision as the Debug one, its package id differs, and the existing lockfile
-keeps working. **Do not regenerate the lockfile afterwards** — instructions that
-tell the receiving side to run `conan lock create` are wrong and break the Debug
-build that already works.
+covers both. **Do not regenerate the lockfile** when adding the Release half —
+instructions that tell the receiving side to run `conan lock create` are wrong and
+break the Debug build that already works.
+
+Adding the Release snapshot is mostly plumbing, but two things cost real time the
+first time and are worth knowing up front:
+
+* the Release graph has to be installed before anything can be resolved —
+  `conan install … -s:h build_type=Release --output-folder=out/conan/release`
+  (that is what happened here first; the packaging script does not do it for you,
+  it only *resolves* and refuses to write an archive whose pkglist has a package
+  without a binary);
+* `Shrimp --selftest` must be flushed, not just written. `std::cout << "…\n"`
+  leaves the bytes in the CRT buffer until exit, and those lines are the only
+  evidence the `run` stage accepts — see *Build Shrimp*.
 
 ### `conan cache save` cannot archive msys2's `etc/mtab`
 
@@ -777,36 +823,42 @@ reads it while compiling, and `conan cache restore` verifies no manifests at all
 (`conan/api/subapi/cache.py`, `restore()`). Delete it instead of replacing it if
 the helper ever becomes unusable — nothing in the build needs it.
 
-`scripts/package-debug-cache.sh` automates all five steps and respects
+`scripts/package-cache.sh` automates all five steps and respects
 `AOI_WITH_SHRIMP` (default `1`, same as `scripts/build-debug.sh`). The default
 packages the `with_shrimp` graph, so the archive carries the private
 `vtk/9.5.0@aoi/stable` package; Qt is in the archive either way. Set
-`AOI_WITH_SHRIMP=0` for the old core-only bundle.
+`AOI_WITH_SHRIMP=0` for the old core-only bundle, and `AOI_CACHE_CONFIG=release`
+to package the Release graph instead of the Debug one.
 
 ### Verify the bundle (do this before every hand-off)
 
-`package-debug-cache.sh` can only report what it *put into* the archive. It
-cannot tell you whether the archive is usable, because this machine has a warm
-cache and will happily build from that instead of from the bundle. Wrap a
-second, empty cache around it:
+`package-cache.sh` can only report what it *put into* the archive. It cannot tell
+you whether the archive is usable, because this machine has a warm cache and will
+happily build from that instead of from the bundle. Wrap a second, empty cache
+around it:
 
 ```console
-$ bash scripts/verify-debug-bundle.sh
+$ bash scripts/verify-bundle.sh
+$ AOI_CACHE_CONFIG=release bash scripts/verify-bundle.sh
 ```
 
 Seven stages, each one a way a hand-off has failed before:
 
 | stage | what it proves |
 |---|---|
-| `home` | starts from a genuinely empty `CONAN_HOME` (`out/verify/conan-home`) |
+| `home` | starts from a genuinely empty `CONAN_HOME` (`out/verify/<config>/conan-home`) |
 | `restore` | the archive unpacks and yields the same binaries the pkglist claims |
 | `check` | `conan cache check-integrity` recomputes every manifest and agrees |
 | `install` | `conan install --no-remote`, **without** `--build=missing` |
-| `build` | cmake configures and builds a fresh tree with the restored toolchain, `bin/` emptied first so no DLL from an earlier run can stand in for one the bundle does not have |
+| `build` | cmake configures and builds in a reused tree with the restored toolchain, `bin/` emptied first so no DLL from an earlier run can stand in for one the bundle does not have. A tree whose `CMakeCache.txt` records a different directory is cleared instead: CMake refuses to configure a tree that has moved, and the error reads like a toolchain problem |
 | `test` | ctest reports 100% |
 | `run` | `Shrimp.exe --selftest` prints `END-TO-END PASS` out of that tree |
 
-Stages can be run on their own — `bash scripts/verify-debug-bundle.sh build test`
+The home is per configuration. Sharing one between the two checks would make
+`restore` pass for an archive that shipped almost nothing (the previous run's
+binaries are still there), and a Debug home would answer a Release resolve.
+
+Stages can be run on their own — `bash scripts/verify-bundle.sh build test`
 — which is what you want while iterating; the full chain is what a hand-off
 needs. Every stage clears what a previous run left behind (the throwaway home,
 and `bin/`, where the executables and their whole DLL closure land), so a second

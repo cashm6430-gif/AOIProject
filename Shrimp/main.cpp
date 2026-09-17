@@ -74,9 +74,23 @@ static int PointCloudWidgetSelfTest(QApplication&)
 
     int rows = w.resultRowCount();
     QString summary = w.resultSummary();
-    std::cout << "[selftest] result table rows = " << rows << "\n";
-    std::cout << "[selftest] summary = " << summary.toStdString() << "\n";
-    std::cout << "[selftest] => " << (rows > 0 ? "END-TO-END PASS" : "END-TO-END FAIL") << "\n";
+    // Flush explicitly instead of relying on the CRT's exit-time flush.
+    //
+    // `\n` only ends the line: the bytes stay in stdout's buffer until the
+    // stream is flushed when the process leaves through the normal C runtime
+    // path -- and this process can leave without that happening.  Measured on
+    // this build: runs that returned 0 (which is `rows > 0`, i.e. the whole
+    // load -> ROI -> measure path had worked) sometimes printed none of the
+    // three lines below.  That is invisible by hand but fatal to automation:
+    // `scripts/build-debug.sh run` and `scripts/verify-bundle.sh run` decide by
+    // grepping for "END-TO-END PASS", so they reported a failure for a run that
+    // had passed.  std::endl flushes; the extra call keeps that true even if
+    // the lines above are edited later.
+    std::cout << "[selftest] result table rows = " << rows << std::endl;
+    std::cout << "[selftest] summary = " << summary.toStdString() << std::endl;
+    std::cout << "[selftest] => " << (rows > 0 ? "END-TO-END PASS" : "END-TO-END FAIL")
+              << std::endl;
+    std::cout.flush();
     return (rows > 0) ? 0 : 1;
 }
 
